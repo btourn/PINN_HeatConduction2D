@@ -16,13 +16,6 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits.mplot3d import axes3d
 
-import ray
-from ray import air, tune
-from ray.train import RunConfig, ScalingConfig, CheckpointConfig
-from ray.train.lightning import RayLightningEnvironment, RayTrainReportCallback, prepare_trainer, RayDDPStrategy
-from ray.train.torch import TorchTrainer
-from ray.tune.schedulers import ASHAScheduler, PopulationBasedTraining
-
 import time
 from datetime import datetime, timedelta
 import os

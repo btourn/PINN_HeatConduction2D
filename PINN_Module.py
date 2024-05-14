@@ -5,10 +5,8 @@ from ActivationAndInitializationFunctions import activation
 
 class Backbone(nn.Module):
     
-    def __init__(self, config):
+    def __init__(self, network_properties, problem_description):
         super().__init__()
-        problem_description = readInputData(config, "Problem description")
-        network_properties = readInputData(config, "Network properties")
 
         self.InputDimensions      = network_properties["InputDimensions"]
         self.OutputDimensions     = network_properties["OutputDimensions"]
@@ -79,10 +77,8 @@ class Backbone(nn.Module):
 
 class PINN_Model(pl.LightningModule):
 
-    def __init__(self, backbone, config):
-        super().__init__()     
-        problem_description = readInputData(config, "Problem description")
-        network_properties = readInputData(config, "Network properties")
+    def __init__(self, backbone, problem_description, network_properties):
+        super().__init__()
 
         self.backbone = backbone
         
@@ -101,12 +97,13 @@ class PINN_Model(pl.LightningModule):
         lb                  = problem_description["SpaceAndTimeLowerBounds"]
         ub                  = problem_description["SpaceAndTimeUpperBounds"]
         ib_conditions       = problem_description["InitialAndBoundaryConditions"]
+        heat_source         = problem_description["HeatSource"]
         nonDimensional      = problem_description["NonDimensional"]
         
         leftBC  = ib_conditions["LeftBoundaryCondition"]
         rightBC = ib_conditions["RightBoundaryCondition"]
         self.Density = float(material_properties["Density"])
-        self.Conductivity = float(material_properties["ThermalConductivity"] )
+        self.ThermalConductivity = float(material_properties["ThermalConductivity"] )
         self.SpecificHeatCapacity = float(material_properties["SpecificHeatCapacity"])
         self.ThermalDiffusivity = float(material_properties["ThermalDiffusivity"])
         self.ReferenceTemperature = float(material_properties["ReferenceTemperature"])
@@ -115,6 +112,7 @@ class PINN_Model(pl.LightningModule):
         self.RightBoundaryCondition = rightBC
         self.DomainLowerBounds = lb
         self.DomainUpperBounds = ub
+        self.HeatSource = heat_source
         self.NonDimensional = nonDimensional
 
         self.NbrOfTrainBatches = []
@@ -326,32 +324,32 @@ class PINN_Model(pl.LightningModule):
 
         return criterion(y_hat, y)
     
-    def governingEquationsResidue(self, X, T, getNormOfGovEqTerms=False):
+    def governingEquationsResidue(self, X, T):
         
-        alpha = self.ThermalDiffusivity
+        rho = self.Density
+        k = self.ThermalConductivity
+        c = self.SpecificHeatCapacity
+        rhoc = rho*c
     
         # Compute the derivatives of the output w.r.t. the inputs using AD mechanism:
         diff_T = torch.autograd.grad(T, X,
                                     create_graph=True,
                                     grad_outputs=torch.ones_like(T))[0]
         
-        Tx, Tt = diff_T[:, 0:1], diff_T[:, 1:2]
+        Tx, Ty, Tt = diff_T[:, 0:1], diff_T[:, 1:2], diff_T[:, 2:3]
 
-        div_Tx = torch.autograd.grad(Tx, X,
+        div_kTx = torch.autograd.grad(k*Tx, X,
                                     create_graph=True,
                                     grad_outputs=torch.ones_like(T))[0][:, 0:1]
-
-        # Residual of the PDE:
-        if getNormOfGovEqTerms:
-            norm_Tt = torch.norm(Tt, p=2).item()
-            norm_div_Tx = torch.norm(div_Tx, p=2).item()
-            self.GetNormOfGovEqTerms = norm_Tt, alpha*norm_div_Tx
-
-        #print('Norm of T_t: ', norm_Tt, ', Norm of div(alpha*grad(T)): ', norm_Txx)
         
-        residue = Tt - alpha*div_Tx
+        div_kTy = torch.autograd.grad(k*Ty, X,
+                                    create_graph=True,
+                                    grad_outputs=torch.ones_like(T))[0][:, 1:2]
 
-        return residue #, norm_Tt, norm_Txx
+        q = self.heatSource(X)
+        residue = rhoc*Tt - (div_kTx + div_kTy) - q
+
+        return residue 
     
     def boundaryConditionsResidue(self, X, T):
         
@@ -398,3 +396,14 @@ class PINN_Model(pl.LightningModule):
         ic_value = self.InitialTemperature(x)
         residue = T - ic_value
         return residue
+
+    def heatSource(self, X):
+
+        x = X[:, 0:1]
+        y = x[:, 1:2]
+        r0 = X[:, 3:4]
+        v = self.HeatSource["Velocity"]
+        P = self.HeatSource["TotalPower"]
+        timestep = -0. + x*v
+        q =  P/(torch.pi*r0**2)*torch.exp(-((x - timestep)**2 + y**2)/r0**2)
+        return q

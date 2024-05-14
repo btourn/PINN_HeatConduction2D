@@ -8,20 +8,14 @@ from pyDOE import lhs
 
 class PINN_DataModule(pl.LightningDataModule):
 
-    def __init__(self, config):
+    def __init__(self, problem_description, collocation_points, labelled_data_points, network_properties, log_path, dir_path):
         super().__init__()
-        problem_description = readInputData(config, "Problem description")
-        network_properties = readInputData(config, "Network properties")
-        collocation_points = readInputData(config, "Collocation points")
-        labelled_data_points = readInputData(config, "Labelled data points")
-        log_path = config["log_path"]
-        dir_path = config["dir_path"]
-        
+
         tags = ["Domain", "BoundaryCondition", "InitialCondition"]
 
         material_properties = problem_description["MaterialProperties"]
-        lb = problem_description["SpaceAndTimeLowerBounds"]
-        ub = problem_description["SpaceAndTimeUpperBounds"]
+        lb = problem_description["VariableLowerBounds"]
+        ub = problem_description["VariableUpperBounds"]
         ib_conditions = problem_description["InitialAndBoundaryConditions"]
         nonDimensional = problem_description["NonDimensional"]
         
@@ -42,28 +36,33 @@ class PINN_DataModule(pl.LightningDataModule):
             self.PersistenWorkers = True
         
         self.ThermalDiffusivity = material_properties["ThermalDiffusivity"]
-        self.BoundaryConditionValue = ib_conditions["BoundaryConditionValue"]
         self.ReferenceTemperature = material_properties["ReferenceTemperature"]
         self.NonDimensional = nonDimensional
         
         self.LB = torch.tensor(lb)
         self.UB = torch.tensor(ub)
         self.x_tensor = torch.linspace(lb[0], ub[0], 10000) 
-        self.t_tensor = torch.linspace(lb[1], ub[1], 10000) 
+        self.y_tensor = torch.linspace(lb[1], ub[1], 10000) 
+        self.t_tensor = torch.linspace(lb[2], ub[2], 10000) 
+        self.r_tensor = torch.linspace(lb[3], ub[3], 10000) 
         x_test = torch.linspace(lb[0], ub[0], 1000) 
-        t_test = torch.linspace(lb[1], ub[1], 1000) 
+        y_test = torch.linspace(lb[1], ub[1], 1000) 
+        t_test = torch.linspace(lb[2], ub[2], 1000)
+        r_test = torch.linspace(lb[3], ub[3], 1000)
         self.x_test = x_test
+        self.y_test = y_test
         self.t_test = t_test
-        ms_x, ms_t = torch.meshgrid(x_test, t_test)
-        x_test = ms_x.flatten().view(-1, 1)
-        t_test = ms_t.flatten().view(-1, 1)
-        self.X_test = torch.cat([x_test, t_test], axis=1)
-        self.T_exact = exactSolution(self, x_test, t_test)
+        self.r_test = r_test
+        #ms_x, ms_t = torch.meshgrid(x_test, t_test)
+        #x_test = ms_x.flatten().view(-1, 1)
+        #t_test = ms_t.flatten().view(-1, 1)
+        #self.X_test = torch.cat([x_test, t_test], axis=1)
+        #self.T_exact = exactSolution(self, x_test, t_test)
         
         N_dom = collocation_points['Domain']
         N_bc  = collocation_points['BoundaryCondition']
         N_ic  = collocation_points['InitialCondition']
-        N_points = [N_dom, 2*N_bc, N_ic]
+        N_points = [N_dom, 4*N_bc, N_ic]
         
         useData = labelled_data_points["UseLabelledData"]
         if useData:
@@ -210,7 +209,7 @@ class PINN_DataModule(pl.LightningDataModule):
         UB = self.UB
         if samplingType=='LHS':
             # Generate collocation points within the domain using Latin Hypercube Sampling (LHS) strategy
-            X_dom = (LB + (UB - LB)*lhs(2, N_dom)).to(torch.float32) 
+            X_dom = (LB + (UB - LB)*lhs(len(LB), N_dom)).to(torch.float32) 
 
         if samplingType=='Sobol':
             # Generate collocation points within the domain using Sobol sequence strategy
@@ -221,31 +220,51 @@ class PINN_DataModule(pl.LightningDataModule):
     def boundaries(self, stage, tag):
         
         # Generate random collocation points for the two BC from self.t_tensor
-        N_bc = int(self.DatasetLengths[tag][stage]/2)
+        N_bc = int(self.DatasetLengths[tag][stage]/4)
         LB = self.LB
         UB = self.UB
+        x_tensor = self.x_tensor
+        y_tensor = self.y_tensor
         t_tensor = self.t_tensor
-        X = []
+        r_tensor = self.r_tensor
+        X, Y = [], []
         x_limits = [LB[0], UB[0]]
+        y_limits = [LB[1], UB[1]]
         for x_limit in x_limits:
             idx_bc = np.random.choice(t_tensor.size()[0], N_bc, replace=False)
-            t_bc = t_tensor[idx_bc].view(-1, 1)
             x_bc = x_limit*torch.ones((N_bc, 1))
-            X.append(torch.cat([x_bc, t_bc], axis=1))
+            y_bc = y_tensor[idx_bc].view(-1, 1)
+            t_bc = t_tensor[idx_bc].view(-1, 1)
+            r_bc = r_tensor[idx_bc].view(-1, 1)
+            X.append(torch.cat([x_bc, y_bc, t_bc, r_bc], axis=1))
+
+        for y_limit in y_limits:
+            idx_bc = np.random.choice(t_tensor.size()[0], N_bc, replace=False)
+            x_bc = x_tensor[idx_bc].view(-1, 1)
+            y_bc = y_limit*torch.ones((N_bc, 1))
+            t_bc = t_tensor[idx_bc].view(-1, 1)
+            r_bc = r_tensor[idx_bc].view(-1, 1)
+            Y.append(torch.cat([x_bc, y_bc, t_bc, r_bc], axis=1))
 
         X_bc = torch.cat([X[0], X[1]], axis=0)
-        return X_bc
+        Y_bc = torch.cat([Y[0], Y[1]], axis=0)
+        XY_bc = torch.cat([X_bc, Y_bc], axis=0)
+        return XY_bc
     
     def initialCondition(self, stage, tag):
     
         # Generate collocation points for the IC from self.x_tensor
         N_ic = self.DatasetLengths[tag][stage]
         x_tensor = self.x_tensor
+        y_tensor = self.y_tensor
+        r_tensor = self.r_tensor
         idx_ic = np.random.choice(x_tensor.size()[0], N_ic, replace=False)
-        x_ic = self.x_tensor[idx_ic].view(-1, 1)
+        x_ic = x_tensor[idx_ic].view(-1, 1)
+        y_ic = y_tensor[idx_ic].view(-1, 1)
         t_ic = torch.zeros((N_ic, 1))
-        X_ic = torch.cat([x_ic, t_ic], axis=1)
-        return X_ic
+        r_ic = r_tensor[idx_ic].view(-1, 1)
+        XY_ic = torch.cat([x_ic, y_ic, t_ic, r_ic], axis=0)
+        return XY_ic
         
     def labelledData(self, stage, tag):
         
