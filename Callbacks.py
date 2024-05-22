@@ -3,9 +3,9 @@ from ImportPackages import *
 from pytorch_lightning.callbacks import Callback
 
 from tempfile import TemporaryDirectory
-import ray
-import ray.train
-from ray.train import Checkpoint
+#import ray
+#import ray.train
+#from ray.train import Checkpoint
 
 
 class PrintingCallback(Callback):

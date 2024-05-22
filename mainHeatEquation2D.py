@@ -13,21 +13,24 @@ def initialize_inputs():
     # Retrieve data from input data file
     rho = 7.6e-6 # Density (kg/mm^3)
     k = 0.025 # Thermal Conductivity (W/mm.K)
-    cp = 685 # Specific Heat Capacity (J/kg.K)
+    cp = 685.0 # Specific Heat Capacity (J/kg.K)
     alpha = k/(rho*cp) # Thermal Diffusivity
-    referenceTemperature = 1000 # Temperature (K)
-    L, H = 100.0, 50.0 # Size of rectngular domain (mm)
-    r0_i, r0_f = 0.0, 2.0 # Characteristic radius (mm)
-    xi, xf = 0, L # x-limits
+    T0 = 298.0 # Initial temperature (K)
+    referenceTemperature = 298.0 # Temperature (K)
+    L, H = 100.0, 50.0 # Size of rectangular domain (mm)
+    r0_i, r0_f = 2.0, 2.0 # Characteristic radius (mm)
+    xi, xf = 0.0, L # x-limits
     yi, yf = -H/2, H/2 # y-limits
-    ti, tf = 0, 50 # Time domain(s)
-    vs = 2 # Heat source velocity (mm/s)
-    P = 62.83185 # Heat source total power (W)
+    ti, tf = 0.0, 50.0 # Time domain(s)
+    vs = 0 #2 # Heat source velocity (mm/s)
+    P = 5.0 #62.83185 # Heat source total power (W)
+    x0_s, y0_s = 50.0, 0.0 # Initial position of heat source (mm)
+    ts = vs*L # Time heat source is actually on (s)
     rho_ref = k_ref = cp_ref = alpha_ref = T_ref = vs_ref = P_ref = kx = kt = 1
-    nonDimensional = 0
-    hardImposedDirichletBC = 0
+    nonDimensional = False
+    hardImposedDirichletBC = False
     if nonDimensional:
-        rho_ref, k_ref, cp_ref, alpha_ref, T_ref= rho, k, cp, alpha, referenceTemperature
+        rho_ref, k_ref, cp_ref, alpha_ref, T_ref = rho, k, cp, alpha, referenceTemperature
         vs_ref = alpha/L
         P_ref = k*T_ref
         kx, kt = 1/xf, k_ref/(rho_ref*cp_ref*(xf-xi)**2)
@@ -58,7 +61,6 @@ def initialize_inputs():
         "InitialTime": ti*kt, # seconds
         "FinalTime": tf*kt # seconds
     }
-    T0 = material_properites_["ReferenceTemperature"]
     ib_conditions_ = {
         "Dict_Name": "Initial and boundary conditions",
         "InitialCondition": T0/T_ref, # K
@@ -83,6 +85,10 @@ def initialize_inputs():
         "Dict_Name": "Heat source data",
         "Velocity": vs/vs_ref,
         "TotalPower": P/P_ref,
+        "InitialXPosition": x0_s*kx,
+        "InitialYPosition": y0_s*kx,
+        "InitialTime": ti*kt,
+        "TimeHeatSourceIsOn": ts*kt,
         "LowerCharacteristicRadius": r0_i*kx,
         "UpperCharacteristicRadius": r0_f*kx,
     }
@@ -102,9 +108,11 @@ def initialize_inputs():
     }
     collocation_points_ = {
         "Dict_Name": "Collocation points",
-        "Domain": 1000,
-        "BoundaryCondition": 50,
-        "InitialCondition": 100,
+        "Domain": 10000, #100,
+        "BoundaryCondition": 500, #12,
+        "InitialCondition": 10000, #10,
+        "ProportionOfEntriesWithinDisk": 0.1,
+        "RadiusOfDisk": 0.1*kx
     }
     labelled_data_points_ = {
         "Dict_Name": "Labelled data points",
@@ -113,15 +121,15 @@ def initialize_inputs():
     }
     network_properties_ = {
         "Dict_Name": "Network properties",
-        "InputDimensions": 3,
+        "InputDimensions": 4,
         "OutputDimensions": 1,
         "HiddenLayers": 4,
-        "NumberOfNeurons": 200,
+        "NumberOfNeurons": 100,
         "DatasetPartitions": [0.6, 0.2, 0.2],
         "WeightDecay": 0,
-        "Epochs": 10,
-        "LearningRate": 1e-3,
-        "Activation": "tanh",
+        "Epochs": 1000,
+        "LearningRate": 1e-2,
+        "Activation": "tanh", #"tanh",
         "Optimizer": "ADAM",
         "Criterion": "MSE",
         "Device": "cpu",
@@ -139,8 +147,18 @@ def initialize_inputs():
     if not os.path.exists("./" + log_path_):
         os.makedirs("./" + log_path_)
 
-    return problem_description_, collocation_points_, labelled_data_points_, network_properties_, log_path_, dir_path_
+    # Save variables as pickle
+    with open("./" + log_path_ + "/" + '_problem_description.pkl', 'wb') as f:
+        pickle.dump(problem_description_, f)
+    with open("./" + log_path_ + "/" + '_collocation_points.pkl', 'wb') as f:
+        pickle.dump(collocation_points_, f)
+    with open("./" + log_path_ + "/" + '_labelled_data_points.pkl', 'wb') as f:
+        pickle.dump(labelled_data_points_, f)    
+    with open("./" + log_path_ + "/" + '_network_properties.pkl', 'wb') as f:
+        pickle.dump(network_properties_, f)
 
+
+    return problem_description_, collocation_points_, labelled_data_points_, network_properties_, log_path_, dir_path_
 
 
 def main():
@@ -167,13 +185,17 @@ def main():
 
     # Generate data
     dataModule = PINN_DataModule(problem_description, collocation_points, labelled_data_points, network_properties, log_path, dir_path)
+    with open("./" + log_path + "/" + '_dataModule.pkl', 'wb') as f:
+        pickle.dump(dataModule, f)
     #dataModule.plotDistribution("./" + log_path)
 
-    dataModule.prepare_data()
+    #dataModule.prepare_data()
 
     # Generate model
     model = Backbone(network_properties, problem_description)
     init_xavier(model)
+    with open("./" + log_path + "/" + '_model.pkl', 'wb') as f:
+        pickle.dump(model, f)
     PINN_model = PINN_Model(model, network_properties, problem_description)
 
     # Define flags for callbacks, checkpoints, hardware, etc.
@@ -185,9 +207,9 @@ def main():
     modelCheckpoints  = ModelCheckpoint(
         monitor='loss_val', 
         mode='min', 
-        every_n_epochs=1, 
+        every_n_epochs=100, 
         save_on_train_epoch_end=True, 
-        save_top_k=1)
+        save_top_k=-1)
     callbacks = [printingCallbacks, 
                  metricTracker, 
                  modelCheckpoints, 
@@ -200,11 +222,13 @@ def main():
         deterministic=True,
         callbacks=callbacks,
         inference_mode=False,
-        check_val_every_n_epoch=2,
+        check_val_every_n_epoch=50,
         enable_progress_bar=False
         #profiler='simple'
         #log_every_n_steps=5
     )
+    with open("./" + log_path + "/" + '_trainer.pkl', 'wb') as f:
+        pickle.dump(trainer, f)
 
     # Train the model
     print("##############   Fitting Model   ##############")

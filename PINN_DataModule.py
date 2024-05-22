@@ -4,6 +4,7 @@ from miscelaneous import *
 from torch.utils.data import Dataset, DataLoader, ConcatDataset, random_split
 from pytorch_lightning.utilities import CombinedLoader
 from pyDOE import lhs
+import sobol_seq
 
 
 class PINN_DataModule(pl.LightningDataModule):
@@ -14,10 +15,13 @@ class PINN_DataModule(pl.LightningDataModule):
         tags = ["Domain", "BoundaryCondition", "InitialCondition"]
 
         material_properties = problem_description["MaterialProperties"]
-        lb = problem_description["VariableLowerBounds"]
-        ub = problem_description["VariableUpperBounds"]
-        ib_conditions = problem_description["InitialAndBoundaryConditions"]
-        nonDimensional = problem_description["NonDimensional"]
+        physical_domain     = problem_description["PhysicalDomain"]
+        time_domain         = problem_description["TimeDomain"]
+        lb                  = problem_description["VariableLowerBounds"]
+        ub                  = problem_description["VariableUpperBounds"]
+        ib_conditions       = problem_description["InitialAndBoundaryConditions"]
+        heat_source         = problem_description["HeatSource"]
+        nonDimensional      = problem_description["NonDimensional"]
         
         proportions = network_properties["DatasetPartitions"]
         batchSizeTrain = network_properties["BatchSizeTrain"]
@@ -35,9 +39,12 @@ class PINN_DataModule(pl.LightningDataModule):
             self.PinMemory = True
             self.PersistenWorkers = True
         
+        self.PhysicalDomain = physical_domain
+        self.TimeDomain = time_domain
         self.ThermalDiffusivity = material_properties["ThermalDiffusivity"]
         self.ReferenceTemperature = material_properties["ReferenceTemperature"]
         self.NonDimensional = nonDimensional
+        self.HeatSource = heat_source
         
         self.LB = torch.tensor(lb)
         self.UB = torch.tensor(ub)
@@ -45,23 +52,15 @@ class PINN_DataModule(pl.LightningDataModule):
         self.y_tensor = torch.linspace(lb[1], ub[1], 10000) 
         self.t_tensor = torch.linspace(lb[2], ub[2], 10000) 
         self.r_tensor = torch.linspace(lb[3], ub[3], 10000) 
-        x_test = torch.linspace(lb[0], ub[0], 1000) 
-        y_test = torch.linspace(lb[1], ub[1], 1000) 
-        t_test = torch.linspace(lb[2], ub[2], 1000)
-        r_test = torch.linspace(lb[3], ub[3], 1000)
-        self.x_test = x_test
-        self.y_test = y_test
-        self.t_test = t_test
-        self.r_test = r_test
-        #ms_x, ms_t = torch.meshgrid(x_test, t_test)
-        #x_test = ms_x.flatten().view(-1, 1)
-        #t_test = ms_t.flatten().view(-1, 1)
-        #self.X_test = torch.cat([x_test, t_test], axis=1)
+        
+        #self.X_test = torch.cat([x_test, y_test], axis=1)
         #self.T_exact = exactSolution(self, x_test, t_test)
         
         N_dom = collocation_points['Domain']
         N_bc  = collocation_points['BoundaryCondition']
         N_ic  = collocation_points['InitialCondition']
+        prop  = collocation_points['ProportionOfEntriesWithinDisk']
+        rd    = collocation_points['RadiusOfDisk']
         N_points = [N_dom, 4*N_bc, N_ic]
         
         useData = labelled_data_points["UseLabelledData"]
@@ -79,6 +78,9 @@ class PINN_DataModule(pl.LightningDataModule):
                 idx = lengths.index(max(lengths))
                 lengths[idx] -= sum_lengths - Ni
             listOfDicts.append(dict(zip(stages[0:3], lengths)))
+
+        self.ProportionOfEntriesWithinDisk = prop
+        self.RadiusOfDisk = rd
 
         self.Proportions    = dict(zip(stages[0:3], proportions))
         self.BatchSizes     = dict(zip(stages[0:3], batchSizes))
@@ -114,6 +116,7 @@ class PINN_DataModule(pl.LightningDataModule):
                 path_validation = self.DirPath + '/validate.pt'
             self.train = torch.load(path_train)
             self.validation = torch.load(path_validation)
+
         if stage == "validate":
             if self.DirPath==None:
                 path_validation = self.LogPath + '/validate.pt'
@@ -183,10 +186,10 @@ class PINN_DataModule(pl.LightningDataModule):
     def buildDataset(self, stage):
         ds = []
         if stage=='predict':
-            return CustomDataset(self.X_test, self.T_exact)
+            return CustomDataset(0, 0) #CustomDataset(self.X_test, self.T_exact)
         for tag in self.Tags:
             if tag == "Domain":
-                X = self.domain('LHS', stage, tag)
+                X = self.domain('Sobol', stage, tag)
                 y = torch.zeros((len(X), 1))
             if tag == "BoundaryCondition":
                 X = self.boundaries(stage, tag)
@@ -209,13 +212,14 @@ class PINN_DataModule(pl.LightningDataModule):
         UB = self.UB
         if samplingType=='LHS':
             # Generate collocation points within the domain using Latin Hypercube Sampling (LHS) strategy
-            X_dom = (LB + (UB - LB)*lhs(len(LB), N_dom)).to(torch.float32) 
+            XY_dom = (LB + (UB - LB)*lhs(len(LB), N_dom)).to(torch.float32) 
 
         if samplingType=='Sobol':
             # Generate collocation points within the domain using Sobol sequence strategy
-            raise ValueError('Sobol sequence not coded yet!')
+            dataset = self.generateData(tag, N_dom)
+            XY_dom = torch.from_numpy(dataset).type(torch.FloatTensor)
         
-        return X_dom
+        return XY_dom
             
     def boundaries(self, stage, tag):
         
@@ -255,17 +259,11 @@ class PINN_DataModule(pl.LightningDataModule):
     
         # Generate collocation points for the IC from self.x_tensor
         N_ic = self.DatasetLengths[tag][stage]
-        x_tensor = self.x_tensor
-        y_tensor = self.y_tensor
-        r_tensor = self.r_tensor
-        idx_ic = np.random.choice(x_tensor.size()[0], N_ic, replace=False)
-        x_ic = x_tensor[idx_ic].view(-1, 1)
-        y_ic = y_tensor[idx_ic].view(-1, 1)
-        t_ic = torch.zeros((N_ic, 1))
-        r_ic = r_tensor[idx_ic].view(-1, 1)
-        XY_ic = torch.cat([x_ic, y_ic, t_ic, r_ic], axis=0)
+        dataset = self.generateData(tag, N_ic)
+        XY_ic = torch.from_numpy(dataset).type(torch.FloatTensor)
         return XY_ic
-        
+
+
     def labelledData(self, stage, tag):
         
         # Generate labelled data points within the domain using Latin Hypercube Sampling (LHS) strategy
@@ -278,6 +276,72 @@ class PINN_DataModule(pl.LightningDataModule):
             return X_data, T_data
         
         return None
+
+
+    def generateData(self, tag, N):
+
+        skip = 0
+        prop = self.ProportionOfEntriesWithinDisk
+        ring_thick = self.RadiusOfDisk
+        s_ring_rad = 0.0
+        n = int(N*prop) #number of total center-bias points
+
+        xi = self.PhysicalDomain["LeftCoordinate"]
+        xf = self.PhysicalDomain["RightCoordinate"]
+        yi = self.PhysicalDomain["BottomCoordinate"]
+        yf = self.PhysicalDomain["TopCoordinate"]
+
+        ti = self.TimeDomain["InitialTime"]
+        tf = self.TimeDomain["FinalTime"]
+
+        x0 = self.HeatSource["InitialXPosition"] #Initial position of laser over x-axis
+        y0 = self.HeatSource["InitialYPosition"] #Initial position of laser over y-axis
+        t0 = self.HeatSource["InitialTime"] #Time where transient analysis begins
+        vs = self.HeatSource["Velocity"] #Velocity of heat source
+        r0_i = self.HeatSource["LowerCharacteristicRadius"] 
+        r0_f = self.HeatSource["UpperCharacteristicRadius"]
+
+        data_x = np.full((N, 1), np.nan)
+        data_y = np.full((N, 1), np.nan)
+
+        if tag=='Domain':
+            data_t = (ti + (tf - ti))*lhs(1, N)
+        elif tag=='InitialCondition':
+            data_t = np.full((N, 1), t0)
+        else:
+            raise ValueError('Invalid tag!')
+
+        if r0_i==r0_f:
+            data_r = r0_i*np.ones_like(data_x)
+        else:
+            data_r = (r0_i + (r0_f - r0_i))*lhs(1, N)
+        data_x[:N-n-1, 0] = np.random.triangular(xi, x0 + data_t[:N-n-1, 0]*vs, xf) #majority of coll points sampled around laser
+        
+        while True: #Loop the ensure that the samples from the Laplace distribution are within the limits (yi, yf)
+            aux = np.random.laplace(y0, 0.1*(yf+abs(yi))/2, N-n-1)
+            aux_min = np.min(aux)
+            aux_max = np.max(aux)
+            if (aux_min>=yi) and (aux_max<=yf):
+                break
+        data_y[:N-n-1, 0] = aux
+        for j in range(N-n-1, N): #Center-bias: some points directly in laser center
+            seed = j + skip
+            rnd, _ = sobol_seq.i4_sobol(3, seed)
+            radi =  s_ring_rad + rnd[0]*ring_thick
+            theta = rnd[1]*np.pi/2 
+            phi = rnd[2]*2*np.pi
+            coord_x = x0 + (data_t[j, :] - t0)*vs + radi*np.cos(phi)*np.sin(theta)
+            #coord_x = x0 + radi*np.cos(phi)*np.sin(theta)
+            if (coord_x<xi):
+                coord_x = -coord_x
+            elif (coord_x>xf):
+                coord_x = xf - coord_x
+            data_x[j, :] = coord_x
+            data_y[j, :] = y0 + radi*np.sin(phi)*np.sin(theta)
+
+        dataset = np.concatenate((data_x, data_y, data_t, data_r), axis=1)
+        return dataset
+
         
     def getRepresentativeBatchSizes(self, stage):
 

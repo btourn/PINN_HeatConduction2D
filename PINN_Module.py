@@ -20,8 +20,8 @@ class Backbone(nn.Module):
         self.LeftBoundaryCondition  = problem_description["InitialAndBoundaryConditions"]["LeftBoundaryCondition"]
         self.RightBoundaryCondition = problem_description["InitialAndBoundaryConditions"]["RightBoundaryCondition"]
         self.HardImposedDirichletBC = problem_description["HardImposedDirichletBC"]
-        lb = problem_description["SpaceAndTimeLowerBounds"]
-        ub = problem_description["SpaceAndTimeUpperBounds"]
+        lb = problem_description["VariableLowerBounds"]
+        ub = problem_description["VariableUpperBounds"]
         self.LB = torch.tensor(lb, device=self.Device)
         self.UB = torch.tensor(ub, device=self.Device)
 
@@ -35,6 +35,10 @@ class Backbone(nn.Module):
         
     def forward(self, x):
         x = 2*(x - self.LB)/(self.UB - self.LB) - 1
+        for i in range(x.shape[1]):
+            xi = x[:, i]
+            if torch.all(torch.isnan(xi)):
+                x[:, i] = self.LB[i]
 
         out = self.ActivationFunction(self.InputLayer(x))
         for k, l in enumerate(self.HiddenLayers):
@@ -77,7 +81,7 @@ class Backbone(nn.Module):
 
 class PINN_Model(pl.LightningModule):
 
-    def __init__(self, backbone, problem_description, network_properties):
+    def __init__(self, backbone, network_properties, problem_description):
         super().__init__()
 
         self.backbone = backbone
@@ -94,14 +98,16 @@ class PINN_Model(pl.LightningModule):
         material_properties = problem_description["MaterialProperties"]
         physical_domain     = problem_description["PhysicalDomain"]
         time_domain         = problem_description["TimeDomain"]
-        lb                  = problem_description["SpaceAndTimeLowerBounds"]
-        ub                  = problem_description["SpaceAndTimeUpperBounds"]
+        lb                  = problem_description["VariableLowerBounds"]
+        ub                  = problem_description["VariableUpperBounds"]
         ib_conditions       = problem_description["InitialAndBoundaryConditions"]
         heat_source         = problem_description["HeatSource"]
         nonDimensional      = problem_description["NonDimensional"]
         
-        leftBC  = ib_conditions["LeftBoundaryCondition"]
-        rightBC = ib_conditions["RightBoundaryCondition"]
+        leftBC   = ib_conditions["LeftBoundaryCondition"]
+        rightBC  = ib_conditions["RightBoundaryCondition"]
+        bottomBC = ib_conditions["BottomBoundaryCondition"]
+        topBC    = ib_conditions["TopBoundaryCondition"]
         self.Density = float(material_properties["Density"])
         self.ThermalConductivity = float(material_properties["ThermalConductivity"] )
         self.SpecificHeatCapacity = float(material_properties["SpecificHeatCapacity"])
@@ -110,8 +116,10 @@ class PINN_Model(pl.LightningModule):
         self.InitialTemperature = ib_conditions["InitialCondition"]
         self.LeftBoundaryCondition = leftBC
         self.RightBoundaryCondition = rightBC
-        self.DomainLowerBounds = lb
-        self.DomainUpperBounds = ub
+        self.BottomBoundaryCondition = bottomBC
+        self.TopBoundarycondition = topBC
+        self.VariableLowerBounds = lb
+        self.VariableUpperBounds = ub
         self.HeatSource = heat_source
         self.NonDimensional = nonDimensional
 
@@ -143,6 +151,7 @@ class PINN_Model(pl.LightningModule):
                 if X==None:
                     y, y_hat = 0, 0
                     continue
+                X.requires_grad = True
                 T = self.backbone(X) 
                 y_hat = self.boundaryConditionsResidue(X, T)
             if key=='InitialCondition':
@@ -208,6 +217,7 @@ class PINN_Model(pl.LightningModule):
             #y_hat = torch.tensor([0.0, 0.0])
             #y = torch.tensor([0.0, 0.0])
         if dataloader_idx==1:
+            X.requires_grad = True
             T = self.backbone(X)
             y_hat = self.boundaryConditionsResidue(X, T)
         if dataloader_idx==2:
@@ -261,6 +271,7 @@ class PINN_Model(pl.LightningModule):
             T = self.backbone(X)
             y_hat = self.governingEquationsResidue(X, T)
         if dataloader_idx==1:
+            X.requires_grad = True
             T = self.backbone(X)
             y_hat = self.boundaryConditionsResidue(X, T)
         if dataloader_idx==2:
@@ -354,56 +365,88 @@ class PINN_Model(pl.LightningModule):
     def boundaryConditionsResidue(self, X, T):
         
         x = X[:, 0:1]
-        k = self.Conductivity
+        y = X[:, 1:2]
+        k = self.ThermalConductivity
         BC_left = self.LeftBoundaryCondition
         BC_right = self.RightBoundaryCondition
-        typeOfBC = [BC_left["Type"], BC_right["Type"]]
+        BC_bottom = self.BottomBoundaryCondition
+        BC_top = self.TopBoundarycondition
+
+        typeOfBC = [
+            ["left", BC_left["Type"]], 
+            ["right", BC_right["Type"]], 
+            ["bottom", BC_bottom["Type"]], 
+            ["top", BC_top["Type"]]
+        ]
         
-        x_left  = x==self.DomainLowerBounds[0]
-        x_right = x==self.DomainUpperBounds[0]
-        x_boundary = [x_left, x_right]
+        x_left   = x==self.VariableLowerBounds[0]
+        x_right  = x==self.VariableUpperBounds[0]
+        y_bottom = y==self.VariableLowerBounds[1]
+        y_top    = y==self.VariableUpperBounds[1]
+        boundary = [x_left, x_right, y_bottom, y_top]
         
         bc_values = torch.zeros_like(x)
         residue = torch.zeros_like(x)
-        bc_values[x_left]  = float(BC_left["Value"])
-        bc_values[x_right] = float(BC_right["Value"])
+        bc_values[x_left]   = float(BC_left["Value"])
+        bc_values[x_right]  = float(BC_right["Value"])
+        bc_values[y_bottom] = float(BC_bottom["Value"])
+        bc_values[y_top]    = float(BC_top["Value"])
         
         for i, bc in enumerate(typeOfBC):
-            idx = x_boundary[i].flatten()
+            idx = boundary[i].flatten()
             if bc=='Dirichlet':
                 residue[idx, :] = T[idx, :] - bc_values[idx, :]
                 continue
             
-            T_x = torch.autograd.grad(T, X,
-                                        create_graph=True,
-                                        grad_outputs=torch.ones_like(T))[0][:, 0:1]
+            if (typeOfBC[i][0]=='left') or (typeOfBC[i][0]=='right'):
+                diffT = torch.autograd.grad(T, X,
+                                            create_graph=True,
+                                            grad_outputs=torch.ones_like(T))[0][:, 0:1]
+            elif (typeOfBC[i][0]=='bottom') or (typeOfBC[i][0]=='top'):
+                diffT = torch.autograd.grad(T, X,
+                                            create_graph=True,
+                                            grad_outputs=torch.ones_like(T))[0][:, 1:2]
             
-            if bc=='Neumann':
-                residue[idx, :] = bc_values[idx, :] + k*T_x[idx, :]
+            if bc[1]=='Neumann':
+                residue[idx, :] = bc_values[idx, :] + k*diffT[idx, :]
                 
-            if bc=='Robin':
+            if bc[1]=='Robin':
                 if BC_left.Type==bc:
                     T_infty = float(BC_left["EnvironmentTemperature"])
                 if BC_right.Type==bc:
                     T_infty = float(BC_right["EnvironmentTemperature"])
-                residue[idx, :] = bc_values[idx, :]*(T[idx, :] - T_infty) + k*T_x[idx, :]
+                if BC_bottom==bc:
+                    T_infty = float(BC_bottom["EnvironmentTemperature"])
+                if BC_top==bc:
+                    T_infty = float(BC_top["EnvironmentTemperature"])
+                residue[idx, :] = bc_values[idx, :]*(T[idx, :] - T_infty) + k*diffT[idx, :]
             
         return residue
 
     def initialConditionResidue(self, X, T):
         
         x = X[:, 0:1]
-        ic_value = self.InitialTemperature(x)
+        y = X[:, 1:2]
+        ic_value = self.InitialTemperature
         residue = T - ic_value
         return residue
 
     def heatSource(self, X):
 
         x = X[:, 0:1]
-        y = x[:, 1:2]
+        y = X[:, 1:2]
+        t = X[:, 2:3]
         r0 = X[:, 3:4]
-        v = self.HeatSource["Velocity"]
-        P = self.HeatSource["TotalPower"]
-        timestep = -0. + x*v
-        q =  P/(torch.pi*r0**2)*torch.exp(-((x - timestep)**2 + y**2)/r0**2)
+        v = float(self.HeatSource["Velocity"])
+        P = float(self.HeatSource["TotalPower"])
+        x0 = float(self.HeatSource["InitialXPosition"])
+        vxt = x0 + v*t
+
+        #x1 = x.flatten().detach().numpy()
+        #y1 = y.flatten().detach().numpy()
+        #q1 = P/(2*np.pi*0.02**2)*np.exp(-((x1 - 0.5)**2 + y1**2)/0.02**2)
+        #plt.scatter(x1, q1)
+        #plt.scatter(y1, q1)
+
+        q =  P/(2*torch.pi*r0**2)*torch.exp(-((x - vxt)**2 + y**2)/r0**2)
         return q
