@@ -38,7 +38,7 @@ def initialize_inputs():
     dir_path_ = None
     loadDatasetFromDirectory = 0 #bool(inputData["Load datasets from directory"]["Value"])
     if loadDatasetFromDirectory:
-        dir_path_ = inputData["Load datasets from directory"]["Directory"]
+        dir_path_ = ""
             
     # Define data structures 
     material_properites_ = {
