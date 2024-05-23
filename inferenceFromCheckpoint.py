@@ -8,7 +8,7 @@ from ActivationAndInitializationFunctions import init_xavier
 def main():
     
     # Directory to read data from
-    ckpt_path = "22052024_144849_labelledData0_nonDimensional1/version_0/checkpoints/epoch=1199-step=1200.ckpt"
+    ckpt_path = "23052024_114506_labelledData0_nonDimensional1/version_0/checkpoints/epoch=299-step=300.ckpt"
     print("Checkpoint path: ", ckpt_path)
     log_path = ckpt_path[:ckpt_path.index("/")+1]
     start, end = "=", "-"
