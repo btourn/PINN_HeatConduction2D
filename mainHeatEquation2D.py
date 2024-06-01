@@ -258,7 +258,7 @@ def main():
     dataModule.DirPath = log_path #Needed to tell trainer that we use already built datasets
     keys, preds = [], []
     for key in datasets:
-        ds = datasets[key]
+        ds = datasets[key]git
         dl = DataLoader(dataset=ds, batch_size=len(ds), shuffle=False)
         T_pred_by_batch = trainer.predict(PINN_model, dataloaders=dl, ckpt_path=ckpt_path)
         T_pred = torch.cat(T_pred_by_batch, axis=0)
