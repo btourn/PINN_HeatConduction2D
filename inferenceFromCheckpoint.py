@@ -8,7 +8,7 @@ from ActivationAndInitializationFunctions import init_xavier
 def main():
     
     # Directory to read data from
-    ckpt_path = "23052024_114506_labelledData0_nonDimensional1/version_0/checkpoints/epoch=299-step=300.ckpt"
+    ckpt_path = "30052024_234835_labelledData0_nonDimensional1/version_0/checkpoints/epoch=299-step=300.ckpt"
     print("Checkpoint path: ", ckpt_path)
     log_path = ckpt_path[:ckpt_path.index("/")+1]
     start, end = "=", "-"
@@ -49,7 +49,11 @@ def main():
         map_location=device,
         **input_dict
         )
-
+    
+    ndf = problem_description["NonDimensionalFactors"]
+    kx = ndf["Space"]
+    kt = ndf["Time"]
+    T_ref = ndf["Temperature"]
 
     '''PINN_model.train()
     ds_test = torch.load(log_path + "test.pt")
@@ -64,14 +68,16 @@ def main():
     PINN_model.eval()
 
     # predict with the model
+    ts = 1. # Desired time instant. position of source will be xs=vs*ts
+    r0 = 2. # Desired characteristic radius
     xy_data = problem_description["PhysicalDomain"]
     x = torch.linspace(xy_data["LeftCoordinate"], xy_data["RightCoordinate"], 1000)
     y = torch.linspace(xy_data["BottomCoordinate"], xy_data["TopCoordinate"], 1000)
     ms_x, ms_y = torch.meshgrid(x, y)
     x_pred = ms_x.flatten().view(-1, 1)
     y_pred = ms_y.flatten().view(-1, 1)
-    t_pred = torch.ones_like(x_pred)*25 #0.01
-    r_pred = torch.ones_like(x_pred)*4 #0.01
+    t_pred = torch.ones_like(x_pred)*ts*kt 
+    r_pred = torch.ones_like(x_pred)*r0*kx
     XY_pred = torch.cat([x_pred, y_pred, t_pred, r_pred], axis=1)
     y_hat = PINN_model.backbone(XY_pred)
     ms_values = y_hat.reshape(ms_x.shape)
@@ -79,9 +85,9 @@ def main():
     fig = plt.figure(figsize=(15,10))
     ax = fig.add_subplot(111, projection = '3d')
     surf1 = ax.plot_surface(
-        ms_x.detach().numpy(), 
-        ms_y.detach().numpy(), 
-        np.transpose(ms_values.detach().numpy()), 
+        ms_x.detach().numpy()/kx, 
+        ms_y.detach().numpy()/kx, 
+        ms_values.detach().numpy()*T_ref, 
         cmap=cm.jet, 
         linewidth=0, 
         antialiased=False)
