@@ -18,22 +18,26 @@ def initialize_inputs():
     T0 = 298.0 # Initial temperature (K)
     referenceTemperature = 298.0 # Temperature (K)
     L, H = 100.0, 50.0 # Size of rectangular domain (mm)
-    r0_i, r0_f = 2.0, 2.0 # Characteristic radius (mm)
+    r0_i, r0_f = 0.02, 2.0 # Characteristic radius (mm)
     xi, xf = 0.0, L # x-limits
     yi, yf = -H/2, H/2 # y-limits
     ti, tf = 0.0, 50.0 # Time domain(s)
-    vs = 0 #2 # Heat source velocity (mm/s)
-    P = 5.0 #62.83185 # Heat source total power (W)
-    x0_s, y0_s = 50.0, 0.0 # Initial position of heat source (mm)
+    vs = 2. #2 # Heat source velocity (mm/s)
+    P = 62.83185 # Heat source total power (W)
+    x0_s, y0_s = 0.0, 0.0 # Initial position of heat source (mm)
     ts = vs*L # Time heat source is actually on (s)
     rho_ref = k_ref = cp_ref = alpha_ref = T_ref = vs_ref = P_ref = kx = kt = 1
-    nonDimensional = False
+    nonDimensional = True
     hardImposedDirichletBC = False
     if nonDimensional:
         rho_ref, k_ref, cp_ref, alpha_ref, T_ref = rho, k, cp, alpha, referenceTemperature
         vs_ref = alpha/L
         P_ref = k*T_ref
         kx, kt = 1/xf, k_ref/(rho_ref*cp_ref*(xf-xi)**2)
+
+    nonDimensionalFactors = {'Space': kx,
+                             'Time': kt,
+                             'Temperature': T_ref}
     
     dir_path_ = None
     loadDatasetFromDirectory = 0 #bool(inputData["Load datasets from directory"]["Value"])
@@ -87,8 +91,8 @@ def initialize_inputs():
         "TotalPower": P/P_ref,
         "InitialXPosition": x0_s*kx,
         "InitialYPosition": y0_s*kx,
-        "InitialTime": ti*kt,
-        "TimeHeatSourceIsOn": ts*kt,
+        "InitialTime": (ti+1.0)*kt,
+        "TimeHeatSourceIsOn": (ts-1.0)*kt,
         "LowerCharacteristicRadius": r0_i*kx,
         "UpperCharacteristicRadius": r0_f*kx,
     }
@@ -104,12 +108,13 @@ def initialize_inputs():
         "InitialAndBoundaryConditions": ib_conditions_,
         "HeatSource": heat_source_,
         "NonDimensional": nonDimensional,
+        "NonDimensionalFactors": nonDimensionalFactors,
         "HardImposedDirichletBC": hardImposedDirichletBC,
     }
     collocation_points_ = {
         "Dict_Name": "Collocation points",
         "Domain": 10000, #100,
-        "BoundaryCondition": 500, #12,
+        "BoundaryCondition": 5000, #12,
         "InitialCondition": 10000, #10,
         "ProportionOfEntriesWithinDisk": 0.1,
         "RadiusOfDisk": 0.1*kx
@@ -123,14 +128,14 @@ def initialize_inputs():
         "Dict_Name": "Network properties",
         "InputDimensions": 4,
         "OutputDimensions": 1,
-        "HiddenLayers": 2,
-        "NumberOfNeurons": 50,
+        "HiddenLayers": 3,
+        "NumberOfNeurons": 10,
         "DatasetPartitions": [0.6, 0.2, 0.2],
         "WeightDecay": 0,
-        "Epochs": 1000,
-        "LearningRate": 1e-2,
-        "Activation": "tanh", #"tanh",
-        "Optimizer": "ADAM",
+        "Epochs": 1,
+        "LearningRate": 0.8,
+        "Activation": "sin", #"tanh",
+        "Optimizer": "LBFGS", #"ADAM",
         "Criterion": "MSE",
         "Device": "cpu",
         "BatchSizeTrain": -1,
@@ -207,7 +212,7 @@ def main():
     modelCheckpoints  = ModelCheckpoint(
         monitor='loss_val', 
         mode='min', 
-        every_n_epochs=100, 
+        every_n_epochs=1, 
         save_on_train_epoch_end=True, 
         save_top_k=-1)
     callbacks = [printingCallbacks, 
@@ -222,7 +227,7 @@ def main():
         deterministic=True,
         callbacks=callbacks,
         inference_mode=False,
-        check_val_every_n_epoch=50,
+        check_val_every_n_epoch=1,
         enable_progress_bar=False
         #profiler='simple'
         #log_every_n_steps=5
@@ -249,15 +254,26 @@ def main():
 
     # Make predictions
     print("##############   Evaluating Model   ##############")
-    T_pred_by_batch = trainer.predict(PINN_model, datamodule=dataModule, ckpt_path=ckpt_path)
-    T_pred = torch.cat(T_pred_by_batch, axis=0)
-    T_exact = dataModule.T_exact
-    errors_eval = T_pred - T_exact
-    errors_eval_pct = T_pred/T_exact
-    plot.pointwiseValues(T_pred, dataModule, "./" + log_path, "predicted_temperature.png")
-    plot.pointwiseValues(T_exact, dataModule, "./" + log_path, "exact_temperature.png")
-    plot.pointwiseValues(errors_eval, dataModule, "./" + log_path, "point_wise_temp_diff_errors.png")
-    plot.pointwiseValues(errors_eval_pct, dataModule, "./" + log_path, "point_wise_temp_pct_errors.png")
+    parentDir = './ExactSolutions'
+    files = os.listdir(parentDir)
+    keys, preds = [], []
+    dataModule.DirPath = log_path
+    for file in files:
+        if 'ds' in file:
+            data = scipy.io.loadmat(parentDir + '/' + file)
+            XY = torch.from_numpy(data['XY']).type(torch.FloatTensor)
+            T  = torch.from_numpy(data['T']).type(torch.FloatTensor)
+            ds = CustomDataset(XY, T)
+            dl = DataLoader(dataset=ds, batch_size=len(ds), shuffle=False)
+            T_pred_by_batch = trainer.predict(PINN_model, dataloaders=dl, ckpt_path=ckpt_path)
+            T_pred = torch.cat(T_pred_by_batch, axis=0)
+            keys.append(file)
+            preds.append(T_pred)
+
+    predictions = dict(zip(keys, preds))
+    with open("./" + log_path + "/" + '_predictions.pkl', 'wb') as f:
+        pickle.dump(predictions, f)
+
 
 
 if __name__ == "__main__":
