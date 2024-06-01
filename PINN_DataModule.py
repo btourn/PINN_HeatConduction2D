@@ -14,14 +14,15 @@ class PINN_DataModule(pl.LightningDataModule):
 
         tags = ["Domain", "BoundaryCondition", "InitialCondition"]
 
-        material_properties = problem_description["MaterialProperties"]
-        physical_domain     = problem_description["PhysicalDomain"]
-        time_domain         = problem_description["TimeDomain"]
-        lb                  = problem_description["VariableLowerBounds"]
-        ub                  = problem_description["VariableUpperBounds"]
-        ib_conditions       = problem_description["InitialAndBoundaryConditions"]
-        heat_source         = problem_description["HeatSource"]
-        nonDimensional      = problem_description["NonDimensional"]
+        material_properties   = problem_description["MaterialProperties"]
+        physical_domain       = problem_description["PhysicalDomain"]
+        time_domain           = problem_description["TimeDomain"]
+        lb                    = problem_description["VariableLowerBounds"]
+        ub                    = problem_description["VariableUpperBounds"]
+        ib_conditions         = problem_description["InitialAndBoundaryConditions"]
+        heat_source           = problem_description["HeatSource"]
+        nonDimensional        = problem_description["NonDimensional"]
+        nonDimensionalFactors = problem_description["NonDimensionalFactors"]
         
         proportions = network_properties["DatasetPartitions"]
         batchSizeTrain = network_properties["BatchSizeTrain"]
@@ -44,6 +45,7 @@ class PINN_DataModule(pl.LightningDataModule):
         self.ThermalDiffusivity = material_properties["ThermalDiffusivity"]
         self.ReferenceTemperature = material_properties["ReferenceTemperature"]
         self.NonDimensional = nonDimensional
+        self.NonDimensionalFactors = nonDimensionalFactors
         self.HeatSource = heat_source
         
         self.LB = torch.tensor(lb)
@@ -102,6 +104,8 @@ class PINN_DataModule(pl.LightningDataModule):
             return 
         for stage in self.Stages:
             ds = self.buildDataset(stage)
+            if ds is None:
+                ds = self.generatePredictDatasets()
             torch.save(ds, self.LogPath + '/' + stage + '.pt')
         
 
@@ -186,7 +190,7 @@ class PINN_DataModule(pl.LightningDataModule):
     def buildDataset(self, stage):
         ds = []
         if stage=='predict':
-            return CustomDataset(0, 0) #CustomDataset(self.X_test, self.T_exact)
+            return None #CustomDataset(self.X_test, self.T_exact)
         for tag in self.Tags:
             if tag == "Domain":
                 X = self.domain('Sobol', stage, tag)
@@ -341,6 +345,59 @@ class PINN_DataModule(pl.LightningDataModule):
 
         dataset = np.concatenate((data_x, data_y, data_t, data_r), axis=1)
         return dataset
+    
+
+    def generatePredictDatasets(self):
+
+        nonDimensionalFactors = self.NonDimensionalFactors
+        heatSource = self.HeatSource
+        vs = heatSource["Velocity"]
+        kx = nonDimensionalFactors["Space"]
+        kt = nonDimensionalFactors["Time"]
+        xy_data = self.PhysicalDomain
+
+        eps_x = 1e-3*xy_data["RightCoordinate"]
+        eps_y = 1e-3*xy_data["TopCoordinate"]
+        ys = 0
+        y0 = -np.flipud(np.geomspace(eps_y, xy_data["TopCoordinate"], 10))
+        y1 = np.geomspace(eps_y, xy_data["TopCoordinate"], 10)
+        y  = np.concatenate((y0, np.array([ys]), y1), axis=0)
+
+        #x = torch.linspace(xy_data["LeftCoordinate"], xy_data["RightCoordinate"], 1000)
+        #y = torch.linspace(xy_data["BottomCoordinate"], xy_data["TopCoordinate"], 1000)
+        #ms_x, ms_y = torch.meshgrid(x, y)
+        #x_pred = ms_x.flatten().view(-1, 1)
+        #y_pred = ms_y.flatten().view(-1, 1)
+
+        ds = []
+        keys = []
+        ts_ = [5, 25, 50]
+        r0_ = [0.02, 0.2, 2.0]
+        ts = [kt*x for x in ts_]
+        xs = [kt*x*vs for x in ts_]
+        r0 = [kx*x for x in r0_]
+        name = "ds_"
+        for i, tsi in enumerate(ts):
+            x0 = np.abs(np.geomspace(xs[i], eps_x, 10) - xs[i])
+            x1 = np.geomspace(xs[i]+eps_x, xy_data["RightCoordinate"], 10)
+            x  = np.concatenate((x0, np.array([xs[i]]), x1), axis=0)
+            xt = torch.from_numpy(x).type(torch.FloatTensor)
+            yt = torch.from_numpy(y).type(torch.FloatTensor)
+            ms_x, ms_y = torch.meshgrid(xt, yt)
+            x_pred = ms_x.flatten().view(-1, 1)
+            y_pred = ms_y.flatten().view(-1, 1)
+            t_pred = torch.ones_like(x_pred)*tsi
+            for j, r0j in enumerate(r0):
+                r_pred = torch.ones_like(x_pred)*r0j
+                XY_pred = torch.cat([x_pred, y_pred, t_pred, r_pred], axis=1)
+                T_hat = torch.full(r_pred.size(), torch.nan)
+                s = str(r0_[j]) 
+                aux = s.replace('.', '') + "_" + str(ts_[i]) + "s"
+                keys.append(name + aux)
+                ds.append(CustomDataset(XY_pred, T_hat))
+                
+        return dict(zip(keys, ds))
+
 
         
     def getRepresentativeBatchSizes(self, stage):
