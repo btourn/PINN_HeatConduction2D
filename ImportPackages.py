@@ -12,6 +12,7 @@ from pytorch_lightning.callbacks import Timer
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 import numpy as np
+import scipy.io
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits import mplot3d
