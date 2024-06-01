@@ -254,23 +254,6 @@ def main():
 
     # Make predictions
     print("##############   Evaluating Model   ##############")
-    '''datasets = torch.load(log_path + '/predict.pt')
-    dataModule.DirPath = log_path #Needed to tell trainer that we use already built datasets
-    keys, preds = [], []
-    for key in datasets:
-        ds = datasets[key]git
-        dl = DataLoader(dataset=ds, batch_size=len(ds), shuffle=False)
-        T_pred_by_batch = trainer.predict(PINN_model, dataloaders=dl, ckpt_path=ckpt_path)
-        T_pred = torch.cat(T_pred_by_batch, axis=0)
-        keys.append(key)
-        preds.append(T_pred)
-
-    predictions = dict(zip(keys, preds))
-    with open("./" + log_path + "/" + '_predictions.pkl', 'wb') as f:
-        pickle.dump(predictions, f)'''
-
-
-    
     parentDir = './ExactSolutions'
     files = os.listdir(parentDir)
     keys, preds = [], []
@@ -290,93 +273,6 @@ def main():
     predictions = dict(zip(keys, preds))
     with open("./" + log_path + "/" + '_predictions.pkl', 'wb') as f:
         pickle.dump(predictions, f)
-
-
-
-    PINN_model.eval()
-    nonDimensionalFactors = problem_description["NonDimensionalFactors"]
-    kx = nonDimensionalFactors["Space"]
-    kt = nonDimensionalFactors["Time"]
-    T_ref = nonDimensionalFactors["Temperature"]
-    xy_data = problem_description["PhysicalDomain"]
-    x = torch.linspace(xy_data["LeftCoordinate"], xy_data["RightCoordinate"], 1000)
-    y = torch.linspace(xy_data["BottomCoordinate"], xy_data["TopCoordinate"], 1000)
-    ms_x, ms_y = torch.meshgrid(x, y)
-    x_pred0 = ms_x.flatten().view(-1, 1)
-    y_pred0 = ms_y.flatten().view(-1, 1)
-    x_pred1 = x.view(-1, 1)
-    y_pred1 = torch.zeros_like(x_pred1)
-
-    ts_ = [5, 25, 50]
-    r0_ = [0.02, 0.2, 2.0]
-    ts = [kt*x for x in ts_]
-    r0 = [kx*x for x in r0_]
-    name0 = "predicted_temperature0_"
-    name1 = "predicted_temperature1_"
-    results_path = log_path + "/Results"
-    if not os.path.exists(results_path):
-        os.makedirs(results_path)
-    for i, tsi in enumerate(ts):
-        t_pred0 = torch.ones_like(x_pred0)*tsi
-        t_pred1 = torch.ones_like(x_pred1)*tsi
-        for j, r0j in enumerate(r0):
-            r_pred0 = torch.ones_like(x_pred0)*r0j
-            r_pred1 = torch.ones_like(x_pred1)*r0j
-            XY_pred0 = torch.cat([x_pred0, y_pred0, t_pred0, r_pred0], axis=1)
-            XY_pred1 = torch.cat([x_pred1, y_pred1, t_pred1, r_pred1], axis=1)
-            T_hat0 = PINN_model.backbone(XY_pred0)
-            T_hat1 = PINN_model.backbone(XY_pred1)
-            results0 = torch.cat([XY_pred0, T_hat0], axis=1)
-            results1 = torch.cat([XY_pred1, T_hat1], axis=1)
-            s = str(r0_[j]) 
-            aux = s.replace('.', '') + "_" + str(ts_[i]) + "s"
-            
-            fig = plt.figure(figsize=(15,10))
-            ax = fig.add_subplot(111, projection = '3d')
-            ms_values = T_hat0.reshape(ms_x.shape)
-            surf1 = ax.plot_surface(
-                ms_x.detach().numpy()/kx, 
-                ms_y.detach().numpy()/kx, 
-                ms_values.detach().numpy()*T_ref, 
-                cmap=cm.jet, 
-                linewidth=0, 
-                antialiased=False)
-            fig.colorbar(surf1, shrink=0.5, aspect=5)
-            plt.xlabel('x')
-            plt.ylabel('y')
-            #plt.show()
-            fig_name0 = name0 + aux
-            plt.savefig(results_path + '/' + fig_name0 + ".png")
-            plt.close(fig)
-            plt.pause(1)
-
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-            ax.scatter(x_pred1.detach().numpy(), T_hat1.detach().numpy())
-            plt.xlabel('x')
-            plt.ylabel('T')
-            #plt.show()
-            fig_name1 = name1 + aux
-            plt.savefig(results_path + '/' + fig_name1 + ".png")
-            plt.close(fig)
-            plt.pause(1)
-
-            scipy.io.savemat(results_path + '/' + fig_name0 + ".mat", {"results0": results0.detach().numpy()})
-            scipy.io.savemat(results_path + '/' + fig_name1 + ".mat", {"results1": results1.detach().numpy()})
-
-
-
-    '''T_pred_by_batch = trainer.predict(PINN_model, datamodule=dataModule, ckpt_path=ckpt_path)
-    T_pred = torch.cat(T_pred_by_batch, axis=0)
-    T_exact = dataModule.T_exact
-    errors_eval = T_pred - T_exact
-    errors_eval_pct = T_pred/T_exact
-    plot.pointwiseValues(T_pred, dataModule, "./" + log_path, "predicted_temperature.png")
-    plot.pointwiseValues(T_exact, dataModule, "./" + log_path, "exact_temperature.png")
-    plot.pointwiseValues(errors_eval, dataModule, "./" + log_path, "point_wise_temp_diff_errors.png")
-    plot.pointwiseValues(errors_eval_pct, dataModule, "./" + log_path, "point_wise_temp_pct_errors.png")'''
-
-    
 
 
 
