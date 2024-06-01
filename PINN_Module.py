@@ -26,10 +26,15 @@ class Backbone(nn.Module):
         self.UB = torch.tensor(ub, device=self.Device)
 
         self.InputLayer = nn.Linear(self.InputDimensions, self.NumberOfNeurons)
-
         self.HiddenLayers = nn.ModuleList(
             [nn.Linear(self.NumberOfNeurons, self.NumberOfNeurons) for _ in range(self.NumberOfHiddenLayers - 1)])
         self.OutputLayer = nn.Linear(self.NumberOfNeurons, self.OutputDimensions)
+        
+        '''self.InputLayer = nn.Sequential(nn.Linear(self.InputDimensions, self.NumberOfNeurons), nn.BatchNorm1d(self.NumberOfNeurons))
+        self.HiddenLayers = nn.ModuleList(
+            [nn.Sequential(nn.Linear(self.NumberOfNeurons, self.NumberOfNeurons), nn.BatchNorm1d(self.NumberOfNeurons)) for _ in range(self.NumberOfHiddenLayers - 1)])
+        self.OutputLayer = nn.Linear(self.NumberOfNeurons, self.OutputDimensions)'''
+
 
         self.ActivationFunction = activation(self.ActFunctionString)
         
@@ -140,6 +145,8 @@ class PINN_Model(pl.LightningModule):
         #print('Train batch_idx: ', batch_idx)
         for key in train_batch:
             X, y = train_batch[key]
+            #self.plotActivationFunctionsWhileRunning(X)
+            #self.plotModelParameters()
             if key=='Domain':
                 if X==None:
                     y, y_hat = 0, 0
@@ -319,6 +326,12 @@ class PINN_Model(pl.LightningModule):
             optimizer = torch.optim.Adam(self.parameters(),
                                          lr=self.LearningRate,
                                          weight_decay=self.WeightDecay)
+        elif self.OptimizerString=="LBFGS":
+            optimizer = torch.optim.LBFGS(self.parameters(), 
+                                          lr=self.LearningRate, 
+                                          history_size=100,
+                                          line_search_fn="strong_wolfe",
+                                          tolerance_change=1.0*np.finfo(float).eps)
         else:
             raise ValueError('Not coded yet!')
         
@@ -450,3 +463,62 @@ class PINN_Model(pl.LightningModule):
 
         q =  P/(2*torch.pi*r0**2)*torch.exp(-((x - vxt)**2 + y**2)/r0**2)
         return q
+    
+
+    def plotActivationFunctionsWhileRunning(self, X):
+
+        N = self.backbone.InputDimensions
+        M = self.backbone.NumberOfHiddenLayers
+        H = self.backbone.NumberOfNeurons
+
+
+        inputLayer  = self.backbone.InputLayer
+        hiddenBlock = self.backbone.HiddenLayers
+        outputLayer = self.backbone.OutputLayer
+        layers = [inputLayer]
+        for hiddenLayer in hiddenBlock:
+            layers.append(hiddenLayer)
+        layers.append(outputLayer)
+
+
+        fig, ax = plt.subplots(H, M, figsize=(8,15))
+        for i, layer in enumerate(layers[:-1]):
+            X_layer = layer(X)
+            X = self.backbone.ActivationFunction(X_layer) #torch.tanh(X_layer)            
+            for j in range(H):
+                ax[j, i].scatter(X_layer[j, :].data.cpu().numpy(), X[j, :].data.cpu().numpy())
+                ax[j, i].set_xlim([-6.0, 6.0])
+                ax[j, i].set_ylim([-1.0, 1.0])
+
+        plt.show()
+
+
+    def plotModelParameters(self):
+
+        names, w, b = [], [], []
+        for name, param in self.backbone.named_parameters():
+            names.append(name)
+            if 'weight' in name:
+                w.append(param)
+            if 'bias' in name:
+                b.append(param)
+
+        M = self.backbone.NumberOfHiddenLayers
+
+        title = ['weight', 'bias']
+        fig, ax = plt.subplots(2, M+1, figsize=(15,8))
+        for i in range(M+1):
+            wi = w[i]
+            if len(wi)==1:
+                wi = wi[0]
+            bi = b[i]
+            ax[0, i].plot(wi.detach().numpy())
+            ax[1, i].plot(bi.detach().numpy())
+            if len(bi)==1:
+                ax[1, i].scatter(0, bi.detach().numpy())
+            
+        plt.show()
+
+        
+
+              
