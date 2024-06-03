@@ -132,7 +132,7 @@ def initialize_inputs():
         "NumberOfNeurons": 10,
         "DatasetPartitions": [0.6, 0.2, 0.2],
         "WeightDecay": 0,
-        "Epochs": 1,
+        "Epochs": 10,
         "LearningRate": 0.8,
         "Activation": "sin", #"tanh",
         "Optimizer": "LBFGS", #"ADAM",
@@ -267,6 +267,8 @@ def main():
             dl = DataLoader(dataset=ds, batch_size=len(ds), shuffle=False)
             T_pred_by_batch = trainer.predict(PINN_model, dataloaders=dl, ckpt_path=ckpt_path)
             T_pred = torch.cat(T_pred_by_batch, axis=0)
+            fig_name = 'predict' + file[2:-4]
+            plot.temperaturePrediction(XY, T_pred, log_path, fig_name)
             keys.append(file)
             preds.append(T_pred)
 

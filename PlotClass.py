@@ -99,4 +99,21 @@ class PlotClass():
         plt.savefig(fig_name_path)
         
         
+    def temperaturePrediction(self, XY, T, path, fig_name):
+
+        x = XY[:, 0:1].detach().numpy().flatten()
+        y = XY[:, 1:2].detach().numpy().flatten()
+        z = T.detach().numpy().flatten()
+        triang = mtri.Triangulation(x, y)
+
+        fig = plt.figure(figsize=(15,10))
+        ax = fig.add_subplot(111, projection = '3d')
+        #ax.scatter3D(XY[:, 0:1].detach().numpy(), XY[:, 1:2].detach().numpy(), T_hat.detach().numpy())
+        ax.plot_trisurf(triang, z, cmap='jet')
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_zlabel('T')
+        #plt.show()
+        plt.savefig(path + '/' + fig_name + ".png")
+        plt.close(fig)
         
