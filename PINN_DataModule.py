@@ -300,7 +300,8 @@ class PINN_DataModule(pl.LightningDataModule):
 
         x0 = self.HeatSource["InitialXPosition"] #Initial position of laser over x-axis
         y0 = self.HeatSource["InitialYPosition"] #Initial position of laser over y-axis
-        t0 = self.HeatSource["InitialTime"] #Time where transient analysis begins
+        ti_s = self.HeatSource["InitialTime"] #Time where transient analysis begins
+        tf_s = self.HeatSource["FinalTime"]
         vs = self.HeatSource["Velocity"] #Velocity of heat source
         r0_i = self.HeatSource["LowerCharacteristicRadius"] 
         r0_f = self.HeatSource["UpperCharacteristicRadius"]
@@ -311,7 +312,7 @@ class PINN_DataModule(pl.LightningDataModule):
         if tag=='Domain':
             data_t = (ti + (tf - ti))*lhs(1, N)
         elif tag=='InitialCondition':
-            data_t = np.full((N, 1), t0)
+            data_t = np.full((N, 1), ti)
         else:
             raise ValueError('Invalid tag!')
 
@@ -319,7 +320,13 @@ class PINN_DataModule(pl.LightningDataModule):
             data_r = r0_i*np.ones_like(data_x)
         else:
             data_r = (r0_i + (r0_f - r0_i))*lhs(1, N)
-        data_x[:N-n-1, 0] = np.random.triangular(xi, x0 + data_t[:N-n-1, 0]*vs, xf) #majority of coll points sampled around laser
+        data_t0 = data_t[:N-n-1, 0]
+        data_x0 = data_x[:N-n-1, 0]
+        aux = (data_t0>ti_s) * (data_t0<tf_s)
+        data_x0[aux] = np.random.triangular(x0, x0 + data_t0[aux]*vs, tf_s*vs)
+        data_x0[~aux] = np.random.triangular(xi, xi + data_t0[~aux]*vs, xf)
+        data_x[:len(aux), 0] = data_x0
+        #data_x[:N-n-1, 0] = np.random.triangular(x0, x0 + data_t[:N-n-1, 0]*vs, tf_s*vs) #majority of coll points sampled around laser
         
         while True: #Loop the ensure that the samples from the Laplace distribution are within the limits (yi, yf)
             aux = np.random.laplace(y0, 0.1*(yf+abs(yi))/2, N-n-1)
@@ -334,7 +341,7 @@ class PINN_DataModule(pl.LightningDataModule):
             radi =  s_ring_rad + rnd[0]*ring_thick
             theta = rnd[1]*np.pi/2 
             phi = rnd[2]*2*np.pi
-            coord_x = x0 + (data_t[j, :] - t0)*vs + radi*np.cos(phi)*np.sin(theta)
+            coord_x = x0 + (data_t[j, :] - ti_s)*vs + radi*np.cos(phi)*np.sin(theta)
             #coord_x = x0 + radi*np.cos(phi)*np.sin(theta)
             if (coord_x<xi):
                 coord_x = -coord_x

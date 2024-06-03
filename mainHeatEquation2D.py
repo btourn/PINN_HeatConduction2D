@@ -24,8 +24,8 @@ def initialize_inputs():
     ti, tf = 0.0, 50.0 # Time domain(s)
     vs = 2. #2 # Heat source velocity (mm/s)
     P = 62.83185 # Heat source total power (W)
+    ti_s, tf_s = 1., 50. # Initial and final time of heat source
     x0_s, y0_s = 0.0, 0.0 # Initial position of heat source (mm)
-    ts = vs*L # Time heat source is actually on (s)
     rho_ref = k_ref = cp_ref = alpha_ref = T_ref = vs_ref = P_ref = kx = kt = 1
     nonDimensional = True
     hardImposedDirichletBC = False
@@ -91,8 +91,8 @@ def initialize_inputs():
         "TotalPower": P/P_ref,
         "InitialXPosition": x0_s*kx,
         "InitialYPosition": y0_s*kx,
-        "InitialTime": (ti+1.0)*kt,
-        "TimeHeatSourceIsOn": (ts-1.0)*kt,
+        "InitialTime": ti_s*kt,
+        "FinalTime": tf_s*kt,
         "LowerCharacteristicRadius": r0_i*kx,
         "UpperCharacteristicRadius": r0_f*kx,
     }
