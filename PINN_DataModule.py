@@ -98,6 +98,8 @@ class PINN_DataModule(pl.LightningDataModule):
         self.LogPath = log_path
         self.DirPath = dir_path
 
+        self.save_hyperparameters()
+
     
     def prepare_data(self):
         if self.DirPath!=None:
@@ -148,7 +150,7 @@ class PINN_DataModule(pl.LightningDataModule):
         datasets = []
         for key in self.train:
             ds = DataLoader(dataset=self.train[key], batch_size=self.BatchSizesTrainDict[key],
-                             shuffle=True, num_workers=self.NumWorkers, pin_memory=self.PinMemory, 
+                             shuffle=False, num_workers=self.NumWorkers, pin_memory=self.PinMemory, 
                              persistent_workers=self.PersistenWorkers)
             datasets.append(ds)
             
@@ -186,7 +188,7 @@ class PINN_DataModule(pl.LightningDataModule):
         return DataLoader(dataset=self.predict, batch_size=self.BatchSizePredict, 
                           shuffle=False, num_workers=self.NumWorkers, pin_memory=self.PinMemory, 
                           persistent_workers=self.PersistenWorkers)
-        
+    
     def buildDataset(self, stage):
         ds = []
         if stage=='predict':
@@ -225,10 +227,12 @@ class PINN_DataModule(pl.LightningDataModule):
         
         return XY_dom
             
-    def boundaries(self, stage, tag):
+    def boundaries(self, stage=None, tag=None, N_bc=None):
         
         # Generate random collocation points for the two BC from self.t_tensor
-        N_bc = int(self.DatasetLengths[tag][stage]/4)
+        if N_bc==None:
+            N_bc = int(self.DatasetLengths[tag][stage]/4)
+        
         LB = self.LB
         UB = self.UB
         x_tensor = self.x_tensor
@@ -263,8 +267,12 @@ class PINN_DataModule(pl.LightningDataModule):
     
         # Generate collocation points for the IC from self.x_tensor
         N_ic = self.DatasetLengths[tag][stage]
-        dataset = self.generateData(tag, N_ic)
-        XY_ic = torch.from_numpy(dataset).type(torch.FloatTensor)
+        N0 = int(N_ic*.8) #80% of points completely inside the domain
+        N1 = N_ic - N0 #Remaining points exactly at the boundaries
+        dataset0 = self.generateData(tag, N0)
+        XY_ic0 = torch.from_numpy(dataset0).type(torch.FloatTensor)
+        XY_ic1 = self.boundaries(N_bc=N1)
+        XY_ic = torch.cat([XY_ic0, XY_ic1], axis=0)
         return XY_ic
 
 
@@ -298,8 +306,8 @@ class PINN_DataModule(pl.LightningDataModule):
         ti = self.TimeDomain["InitialTime"]
         tf = self.TimeDomain["FinalTime"]
 
-        x0 = self.HeatSource["InitialXPosition"] #Initial position of laser over x-axis
-        y0 = self.HeatSource["InitialYPosition"] #Initial position of laser over y-axis
+        x0_s = self.HeatSource["InitialXPosition"] #Initial position of laser over x-axis
+        y0_s = self.HeatSource["InitialYPosition"] #Initial position of laser over y-axis
         ti_s = self.HeatSource["InitialTime"] #Time where transient analysis begins
         tf_s = self.HeatSource["FinalTime"]
         vs = self.HeatSource["Velocity"] #Velocity of heat source
@@ -310,9 +318,61 @@ class PINN_DataModule(pl.LightningDataModule):
         data_y = np.full((N, 1), np.nan)
 
         if tag=='Domain':
-            data_t = (ti + (tf - ti))*lhs(1, N)
+            
+            xf_s = x0_s + vs*(tf_s-ti_s)
+            t_before = ti_s - ti
+            t_after  = tf - tf_s
+            case0_t = (t_before==0) and (t_after!=0)
+            case1_t = (t_before!=0) and (t_after==0)
+            case2_t = (t_before!=0) and (t_after!=0)
+            case3_t = (t_before==0) and (t_after==0)
+            if case0_t:
+                t_aux1 = (ti + (tf - ti))*lhs(1, N-n) #tf_s + (tf - tf_s)*lhs(1, N-n)
+                t_aux_s = (ti + (tf_s - ti))*lhs(1, n)
+                x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                data_t = np.concatenate((t_aux1, t_aux_s), axis=0)
+            elif case1_t:
+                t_aux1 = (ti + (tf - ti))*lhs(1, N-n) #ti + (ti_s - ti)*lhs(1, N-n)
+                t_aux_s = ti_s + (tf - ti_s)*lhs(1, n)
+                x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                data_t = np.concatenate((t_aux1, t_aux_s), axis=0)
+            elif case2_t:
+                N1 = int((tf_s - ti)/(tf - ti)*(N-n))
+                N2 = N - N1 - n
+                #t_aux1 = ti + (ti_s - ti)*lhs(1, N1)
+                #t_aux2 = tf_s + (tf - tf_s)*lhs(1, N2)
+                t_aux1 = (ti + (tf - ti))*lhs(1, N-n) #
+                t_aux_s = ti_s + (tf_s - ti_s)*lhs(1, n)
+                x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                #data_t = np.concatenate((t_aux1, t_aux2, t_aux_s), axis=0)
+                data_t = np.concatenate((t_aux1, t_aux_s), axis=0)
+            elif case3_t:
+                data_t = (ti + (tf - ti))*lhs(1, N)
+
+            x_before = x0_s - xi
+            x_after  = xf - xf_s
+            case0_x = (x_before==0) and (x_after!=0)
+            case1_x = (x_before!=0) and (x_after==0)
+            case2_x = (x_before!=0) and (x_after!=0)
+            case3_x = (x_before==0) and (x_after==0)
+            if case0_x:
+                x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf) #(xi + (xf - xi))*lhs(1, N-n)
+                data_x = np.concatenate((x_aux1, x_aux_s), axis=0)
+            elif case1_x:
+                x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf) #(xi + (xf - xi))*lhs(1, N-n)
+                data_x = np.concatenate((x_aux1, x_aux_s), axis=0)
+            elif case2_x:
+                x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf) #(xi + (xf - xi))*lhs(1, N-n)
+                data_x = np.concatenate((x_aux1, x_aux_s), axis=0)
+            elif case3_x:
+                data_x = np.random.triangular(x0_s, x0_s + data_t*vs, xf_s)
+            #data_t = (ti + (tf - ti))*lhs(1, N)
         elif tag=='InitialCondition':
             data_t = np.full((N, 1), ti)
+            data_x = np.full((N, 1), np.nan)
+            data_x[:N-n] = (xi + (xf - xi))*lhs(1, N-n)
+            vs = 0
+            ring_thick *= 10
         else:
             raise ValueError('Invalid tag!')
 
@@ -320,16 +380,16 @@ class PINN_DataModule(pl.LightningDataModule):
             data_r = r0_i*np.ones_like(data_x)
         else:
             data_r = (r0_i + (r0_f - r0_i))*lhs(1, N)
-        data_t0 = data_t[:N-n-1, 0]
-        data_x0 = data_x[:N-n-1, 0]
-        aux = (data_t0>ti_s) * (data_t0<tf_s)
-        data_x0[aux] = np.random.triangular(x0, x0 + data_t0[aux]*vs, tf_s*vs)
-        data_x0[~aux] = np.random.triangular(xi, xi + data_t0[~aux]*vs, xf)
-        data_x[:len(aux), 0] = data_x0
+        #data_t0 = data_t[:N-n-1, 0]
+        #data_x0 = data_x[:N-n-1, 0]
+        #aux = (data_t0>ti_s) * (data_t0<tf_s)
+        #data_x0[aux] = np.random.triangular(x0_s, x0_s+(data_t0[aux]-ti_s)*vs, x0_s+(tf_s-ti_s)*vs)
+        #data_x0[~aux] = np.random.triangular(xi, xi + data_t0[~aux]*vs, xf)
+        #data_x[:len(aux), 0] = data_x0
         #data_x[:N-n-1, 0] = np.random.triangular(x0, x0 + data_t[:N-n-1, 0]*vs, tf_s*vs) #majority of coll points sampled around laser
         
         while True: #Loop the ensure that the samples from the Laplace distribution are within the limits (yi, yf)
-            aux = np.random.laplace(y0, 0.1*(yf+abs(yi))/2, N-n-1)
+            aux = np.random.laplace(y0_s, 0.1*(yf+abs(yi))/2, N-n-1)
             aux_min = np.min(aux)
             aux_max = np.max(aux)
             if (aux_min>=yi) and (aux_max<=yf):
@@ -341,14 +401,14 @@ class PINN_DataModule(pl.LightningDataModule):
             radi =  s_ring_rad + rnd[0]*ring_thick
             theta = rnd[1]*np.pi/2 
             phi = rnd[2]*2*np.pi
-            coord_x = x0 + (data_t[j, :] - ti_s)*vs + radi*np.cos(phi)*np.sin(theta)
+            coord_x = x0_s + (data_t[j, :] - ti_s)*vs + radi*np.cos(phi)*np.sin(theta)
             #coord_x = x0 + radi*np.cos(phi)*np.sin(theta)
             if (coord_x<xi):
                 coord_x = -coord_x
             elif (coord_x>xf):
                 coord_x = xf - coord_x
             data_x[j, :] = coord_x
-            data_y[j, :] = y0 + radi*np.sin(phi)*np.sin(theta)
+            data_y[j, :] = y0_s + radi*np.sin(phi)*np.sin(theta)
 
         dataset = np.concatenate((data_x, data_y, data_t, data_r), axis=1)
         return dataset
