@@ -138,6 +138,8 @@ class PINN_Model(pl.LightningModule):
         self.test_keys    = ['loss_test', 'loss_test_pde', 'loss_test_bc', 'loss_test_ic', 'loss_test_data']
         self.test_losses  = [0 for _ in range(len(self.test_keys))]
 
+        self.save_hyperparameters()
+
 
     def training_step(self, train_batch, batch_idx):
         
@@ -335,7 +337,15 @@ class PINN_Model(pl.LightningModule):
         else:
             raise ValueError('Not coded yet!')
         
-        return optimizer
+        #return optimizer
+        return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
+                    "monitor": "loss"
+                },
+            }
+        
 
     def optimizer_zero_grad(self, epoch, batch_idx, optimizer):
         optimizer.zero_grad(set_to_none=True)
