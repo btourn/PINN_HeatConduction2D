@@ -7,48 +7,44 @@ from ActivationAndInitializationFunctions import init_xavier
 
 def main():
     
-    # Directory to read data from
-    ckpt_path = "30052024_234835_labelledData0_nonDimensional1/version_0/checkpoints/epoch=299-step=300.ckpt"
-    print("Checkpoint path: ", ckpt_path)
-    log_path = ckpt_path[:ckpt_path.index("/")+1]
-    start, end = "=", "-"
-    epoch = ckpt_path[ckpt_path.find(start)+len(start):ckpt_path.rfind(end)]
-
-    # Load pickle variables from directory
-    with open(log_path + '_problem_description.pkl', 'rb') as f:
-        problem_description = pickle.load(f)
-    with open(log_path + '_collocation_points.pkl', 'rb') as f:
-        collocation_points = pickle.load(f)
-    with open(log_path + '_network_properties.pkl', 'rb') as f:
-        network_properties = pickle.load(f)
-
-    
     # Check device availability
-    device_type = network_properties["Device"]
-    if device_type == 'cuda':
-        if torch.cuda.is_available():
-            device = torch.device('cuda')
-        else:
-            device = torch.device('cpu')
-            device_type = 'cpu'
-    elif device_type == 'gpu':
-        device = torch.device('gpu') if torch.cuda.is_available() else torch.device("cpu")
-    elif device_type == 'cpu':
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    else:
         device = torch.device('cpu')
-    network_properties["Device"] = device
-            
+
+    # Directory to read data from
+    ckpt_path = "04062024_205323_labelledData0_nonDimensional1/version_0/checkpoints/epoch=599-step=600.ckpt"
+    log_path = ckpt_path[:ckpt_path.index("/")+1]
+
+    # Load checkpoint
+    ckpt = torch.load(ckpt_path, map_location=device)
+
+    # Retrieve structures from checkpoint
+    model = ckpt['hyper_parameters']['backbone']
+    network_properties = ckpt['hyper_parameters']['network_properties']
+    problem_description = ckpt['hyper_parameters']['problem_description']
     
-    model = Backbone(network_properties, problem_description)
+    # Initialize plot class
+    plot = PlotClass()
+
+    # Load data module
+    with open(log_path + '_dataModule.pkl', 'rb') as f:
+        dataModule = pickle.load(f)
+    
+    # Load model
     input_dict = {
         "backbone": model, 
         "network_properties": network_properties, 
         "problem_description": problem_description
         }
+    
     PINN_model = PINN_Model.load_from_checkpoint(
         checkpoint_path=ckpt_path, 
         map_location=device,
         **input_dict
         )
+
     
     ndf = problem_description["NonDimensionalFactors"]
     kx = ndf["Space"]
@@ -68,7 +64,8 @@ def main():
     PINN_model.eval()
 
     # predict with the model
-    ts = 1. # Desired time instant. position of source will be xs=vs*ts
+    epoch = ckpt['epoch']
+    ts = 0. # Desired time instant. position of source will be xs=vs*ts
     r0 = 2. # Desired characteristic radius
     xy_data = problem_description["PhysicalDomain"]
     x = torch.linspace(xy_data["LeftCoordinate"], xy_data["RightCoordinate"], 1000)
