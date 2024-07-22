@@ -15,7 +15,7 @@ def main():
         device = torch.device('cpu')
 
     # Directory to read data from
-    ckpt_path = "04062024_152456_labelledData0_nonDimensional1/version_0/checkpoints/epoch=199-step=200.ckpt"
+    ckpt_path = "05062024_222528_labelledData0_nonDimensional1/version_0/checkpoints/epoch=899-step=1800.ckpt"
     log_path = ckpt_path[:ckpt_path.index("/")+1]
 
     # Load checkpoint
@@ -39,8 +39,16 @@ def main():
     plot = PlotClass()
 
     # Load data module
-    with open(log_path + '_dataModule.pkl', 'rb') as f:
-        dataModule = pickle.load(f)
+    try:
+        with open(log_path + '_dataModule.pkl', 'rb') as f:
+            dataModule = pickle.load(f)
+    except:
+        collocation_points = ckpt['datamodule_hyper_parameters']['collocation_points']
+        labelled_data_points = ckpt['datamodule_hyper_parameters']['labelled_data_points']
+        log_path = ckpt['datamodule_hyper_parameters']['log_path']
+        dir_path = log_path
+        dataModule = PINN_DataModule(problem_description, collocation_points, labelled_data_points, network_properties, log_path, dir_path)
+    
     
     # Load model
     input_dict = {
@@ -55,7 +63,14 @@ def main():
         **input_dict
         )
 
+
+    PINN_model.plotModelParameters()
+    X = dataModule.domain('Sobol', 'train', 'Domain')
+    PINN_model.plotActivationFunctionsWhileRunning(X)
+
+
     # Load trainer
+    trainer = torch.load(log_path + '/' + '_trainer.pt', map_location=device)
     with open(log_path + '_trainer.pkl', 'rb') as f:
         trainer = pickle.load(f)
     #trainer.fit_loop.max_epochs = 15
@@ -89,40 +104,23 @@ def main():
     print("\nTotal raining time: ", elapsed_time_train + previous_time)
     ckpt_path_opt = glob.glob("./" + log_path + "/version_0/checkpoints/" + "*.ckpt")[0]
     
-    #Testing the model
-    print("##############   Testing Model   ##############")
-    trainer.test(PINN_model, datamodule=dataModule, ckpt_path=ckpt_path_opt)
-
+    
     # Make predictions
-    print("##############   Evaluating Model   ##############")
-    timer.start_time("test")
-    trainer.test(PINN_model, datamodule=dataModule, ckpt_path=ckpt_path)
-    elapsed_time_test = timer.time_elapsed("test")
-    print("\nTesting Time: ", elapsed_time_test)
-
-    # Make predictions
-    print("##############   Evaluating Model   ##############")
-    parentDir = './ExactSolutions'
-    files = os.listdir(parentDir)
     keys, preds = [], []
-    dataModule.DirPath = log_path
-    for file in files:
-        if 'ds' in file:
-            data = scipy.io.loadmat(parentDir + '/' + file)
-            XY = torch.from_numpy(data['XY']).type(torch.FloatTensor)
-            T  = torch.from_numpy(data['T']).type(torch.FloatTensor)
-            ds = CustomDataset(XY, T)
-            dl = DataLoader(dataset=ds, batch_size=len(ds), shuffle=False)
-            T_pred_by_batch = trainer.predict(PINN_model, dataloaders=dl, ckpt_path=ckpt_path)
-            T_pred = torch.cat(T_pred_by_batch, axis=0)
-            fig_name = 'predict' + file[2:-4]
-            plot.temperaturePrediction(XY, T_pred, log_path, fig_name)
-            keys.append(file)
-            preds.append(T_pred)
+    ndf = problem_description["NonDimensionalFactors"]
+    for key in dataModule.AllKeysPredict:
+        dataModule.PredictKey = key
+        T_pred = trainer.predict(PINN_model, datamodule=dataModule, ckpt_path='best')[0]
+        XY = dataModule.predict
+        file = 'predict_' + key
+        keys.append(file)
+        preds.append([XY, T_pred])
+        plot.temperaturePrediction(XY, T_pred, ndf, log_path, file)
 
     predictions = dict(zip(keys, preds))
-    with open("./" + log_path + "/" + '_predictions.pkl', 'wb') as f:
-        pickle.dump(predictions, f)
+    torch.save(predictions, "./" + log_path + "/" + '_predictions.pt')
+    #with open("./" + log_path + "/" + '_predictions.pkl', 'wb') as f:
+    #    pickle.dump(predictions, f)
 
 
 

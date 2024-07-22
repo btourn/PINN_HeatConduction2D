@@ -99,14 +99,18 @@ class PlotClass():
         plt.savefig(fig_name_path)
         
         
-    def temperaturePrediction(self, XY, T, path, fig_name):
+    def temperaturePrediction(self, XY, T, ndf, path, fig_name):
 
-        x = XY[:, 0:1].detach().numpy().flatten()
-        y = XY[:, 1:2].detach().numpy().flatten()
-        z = T.detach().numpy().flatten()
+        kx = ndf["Space"]
+        kt = ndf["Time"]
+        T_ref = ndf["Temperature"]
+
+        x = XY[:, 0:1].detach().numpy().flatten()/kx
+        y = XY[:, 1:2].detach().numpy().flatten()/kx
+        z = T.detach().numpy().flatten()*T_ref
         triang = mtri.Triangulation(x, y)
 
-        fig = plt.figure(figsize=(15,10))
+        fig = plt.figure(figsize=(15, 10))
         ax = fig.add_subplot(111, projection = '3d')
         #ax.scatter3D(XY[:, 0:1].detach().numpy(), XY[:, 1:2].detach().numpy(), T_hat.detach().numpy())
         ax.plot_trisurf(triang, z, cmap='jet')

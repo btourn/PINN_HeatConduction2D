@@ -29,12 +29,6 @@ class Backbone(nn.Module):
         self.HiddenLayers = nn.ModuleList(
             [nn.Linear(self.NumberOfNeurons, self.NumberOfNeurons) for _ in range(self.NumberOfHiddenLayers - 1)])
         self.OutputLayer = nn.Linear(self.NumberOfNeurons, self.OutputDimensions)
-        
-        '''self.InputLayer = nn.Sequential(nn.Linear(self.InputDimensions, self.NumberOfNeurons), nn.BatchNorm1d(self.NumberOfNeurons))
-        self.HiddenLayers = nn.ModuleList(
-            [nn.Sequential(nn.Linear(self.NumberOfNeurons, self.NumberOfNeurons), nn.BatchNorm1d(self.NumberOfNeurons)) for _ in range(self.NumberOfHiddenLayers - 1)])
-        self.OutputLayer = nn.Linear(self.NumberOfNeurons, self.OutputDimensions)'''
-
 
         self.ActivationFunction = activation(self.ActFunctionString)
         
@@ -107,7 +101,7 @@ class PINN_Model(pl.LightningModule):
         ub                  = problem_description["VariableUpperBounds"]
         ib_conditions       = problem_description["InitialAndBoundaryConditions"]
         heat_source         = problem_description["HeatSource"]
-        nonDimensional      = problem_description["NonDimensional"]
+        non_dimensional      = problem_description["NonDimensional"]
         
         leftBC   = ib_conditions["LeftBoundaryCondition"]
         rightBC  = ib_conditions["RightBoundaryCondition"]
@@ -119,6 +113,8 @@ class PINN_Model(pl.LightningModule):
         self.ThermalDiffusivity = float(material_properties["ThermalDiffusivity"])
         self.ReferenceTemperature = float(material_properties["ReferenceTemperature"])
         self.InitialTemperature = ib_conditions["InitialCondition"]
+        self.PhysicalDomain = physical_domain
+        self.TimeDomain = time_domain
         self.LeftBoundaryCondition = leftBC
         self.RightBoundaryCondition = rightBC
         self.BottomBoundaryCondition = bottomBC
@@ -126,7 +122,7 @@ class PINN_Model(pl.LightningModule):
         self.VariableLowerBounds = lb
         self.VariableUpperBounds = ub
         self.HeatSource = heat_source
-        self.NonDimensional = nonDimensional
+        self.NonDimensional = non_dimensional
 
         self.NbrOfTrainBatches = []
         self.NbrOfValidationBatches = [[] for _ in range(4)]
@@ -215,7 +211,7 @@ class PINN_Model(pl.LightningModule):
         aux = "".join(f"{key}: {value:.5e}, " for key, value in log_dict.items())
         print(f"Epoch: {self.current_epoch}, " + aux)
 
-    def validation_step(self, val_batch, batch_idx, dataloader_idx=0):
+    '''def validation_step(self, val_batch, batch_idx, dataloader_idx=0):
         
         X, y = val_batch
         torch.set_grad_enabled(True)
@@ -223,8 +219,6 @@ class PINN_Model(pl.LightningModule):
             X.requires_grad = True
             T = self.backbone(X)
             y_hat = self.governingEquationsResidue(X, T)
-            #y_hat = torch.tensor([0.0, 0.0])
-            #y = torch.tensor([0.0, 0.0])
         if dataloader_idx==1:
             X.requires_grad = True
             T = self.backbone(X)
@@ -237,7 +231,7 @@ class PINN_Model(pl.LightningModule):
             
         loss = self.configure_criterion(y_hat, y) 
         self.NbrOfValidationBatches[dataloader_idx].append(batch_idx)
-        return loss 
+        return loss '''
     
     def on_validation_batch_end(self, out, val_batch, batch_idx, dataloader_idx=0):
         for i in range(len(self.val_losses)-1):
@@ -319,8 +313,7 @@ class PINN_Model(pl.LightningModule):
         self.test_losses = [0 for _ in range(len(avg_loss_keys))]
     
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        X, y = batch
-        T_hat = self.backbone(X)
+        T_hat = self.backbone(batch)
         return T_hat
 
     def configure_optimizers(self):
@@ -337,14 +330,14 @@ class PINN_Model(pl.LightningModule):
         else:
             raise ValueError('Not coded yet!')
         
-        #return optimizer
-        return {
+        return optimizer
+        '''return {
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
                     "monitor": "loss"
                 },
-            }
+            }'''
         
 
     def optimizer_zero_grad(self, epoch, batch_idx, optimizer):
@@ -357,6 +350,17 @@ class PINN_Model(pl.LightningModule):
             raise ValueError('Not coded yet!')
 
         return criterion(y_hat, y)
+
+    def on_after_backward(self):
+        model = self.backbone
+        params = model.state_dict()
+        if self.trainer.max_epochs % self.trainer.check_val_every_n_epoch == 0: 
+            for k, v in params.items():
+                grads = v
+                name = k
+                self.logger.experiment.add_histogram(tag=name, values=grads,
+                                                    global_step=self.trainer.global_step)
+
     
     def governingEquationsResidue(self, X, T):
         
@@ -463,15 +467,14 @@ class PINN_Model(pl.LightningModule):
         v = float(self.HeatSource["Velocity"])
         P = float(self.HeatSource["TotalPower"])
         x0 = float(self.HeatSource["InitialXPosition"])
+        t0 = float(self.HeatSource['InitialTime'])
         vxt = x0 + v*t
 
-        #x1 = x.flatten().detach().numpy()
-        #y1 = y.flatten().detach().numpy()
-        #q1 = P/(2*np.pi*0.02**2)*np.exp(-((x1 - 0.5)**2 + y1**2)/0.02**2)
-        #plt.scatter(x1, q1)
-        #plt.scatter(y1, q1)
+        # Mask to apply a smooth sigmoid variation of the heat source from the initial condition
+        mask = 1/(1 + torch.exp(-9000*(t - 0.01*self.TimeDomain['FinalTime'])))
+        mask[t<=t0] = 0
+        q = P/(torch.pi*r0**2)*torch.exp(-((x - vxt)**2 + y**2)/r0**2)*mask
 
-        q =  P/(2*torch.pi*r0**2)*torch.exp(-((x - vxt)**2 + y**2)/r0**2)
         return q
     
 

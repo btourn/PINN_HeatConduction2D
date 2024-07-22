@@ -71,25 +71,33 @@ class PINN_DataModule(pl.LightningDataModule):
             tags.append("LabelledData")
         self.UseLabelledData = useData
         
-        stages = ['train', 'validate', 'test', 'predict']
+        stages_tags = ['train', 'validate', 'test', 'predict']
         listOfDicts = []
+        stages = []
         for Ni in N_points:
             lengths = [int(np.round(p*Ni)) for p in proportions]
             sum_lengths = sum(lengths)
             if sum_lengths > Ni:
                 idx = lengths.index(max(lengths))
                 lengths[idx] -= sum_lengths - Ni
-            listOfDicts.append(dict(zip(stages[0:3], lengths)))
+            listOfDicts.append(dict(zip(stages_tags[0:3], lengths)))
+
+        stages = [True]*len(stages_tags)
+        for i, p in enumerate(proportions):
+            if p==0:
+                stages[i] = False
 
         self.ProportionOfEntriesWithinDisk = prop
         self.RadiusOfDisk = rd
 
-        self.Proportions    = dict(zip(stages[0:3], proportions))
-        self.BatchSizes     = dict(zip(stages[0:3], batchSizes))
+        self.Proportions    = dict(zip(stages_tags[0:3], proportions))
+        self.BatchSizes     = dict(zip(stages_tags[0:3], batchSizes))
+        self.Stages         = dict(zip(stages_tags, stages))
         self.NumberOfPoints = dict(zip(tags, N_points))
         self.DatasetLengths = dict(zip(tags, listOfDicts))
-        self.Tags   = tags
-        self.Stages = stages
+        self.Tags           = tags
+        self.PredictKey     = None
+        self.AllKeysPredict = None
 
         self.BatchSizesTrainDict      = self.getRepresentativeBatchSizes('train')
         self.BatchSizesValidationDict = self.getRepresentativeBatchSizes('validate')
@@ -104,11 +112,18 @@ class PINN_DataModule(pl.LightningDataModule):
     def prepare_data(self):
         if self.DirPath!=None:
             return 
-        for stage in self.Stages:
-            ds = self.buildDataset(stage)
-            if ds is None:
-                ds = self.generatePredictDatasets()
-            torch.save(ds, self.LogPath + '/' + stage + '.pt')
+        for stage in self.Stages.keys():
+            if self.Stages[stage]>0:
+                fname = self.LogPath + '/' + stage + '.pt'
+                if os.path.isfile(fname):
+                    continue
+                else:
+                    ds = self.buildDataset(stage)
+                    if stage=='predict':
+                        self.AllKeysPredict = list(ds.keys())
+                    torch.save(ds, self.LogPath + '/' + stage + '.pt')
+                    for key in ds:
+                        torch.save(ds[key].X, self.LogPath + '/' + stage + '_' +  key + '.pt')
         
 
     def setup(self, stage: str):
@@ -116,12 +131,21 @@ class PINN_DataModule(pl.LightningDataModule):
         if stage == "fit":
             if self.DirPath==None:
                 path_train = self.LogPath + '/train.pt'
-                path_validation = self.LogPath + '/validate.pt'
+                try: 
+                    path_validation = self.DirPath + '/validate.pt'
+                except:
+                    path_validation = None
             else:
                 path_train = self.DirPath + '/train.pt'
-                path_validation = self.DirPath + '/validate.pt'
+                try: 
+                    path_validation = self.DirPath + '/validate.pt'
+                except:
+                    path_validation = None
             self.train = torch.load(path_train)
-            self.validation = torch.load(path_validation)
+            try: 
+                self.validation = torch.load(path_validation)
+            except:
+                self.validation = None
 
         if stage == "validate":
             if self.DirPath==None:
@@ -139,10 +163,16 @@ class PINN_DataModule(pl.LightningDataModule):
 
         if stage == "predict":
             if self.DirPath==None:
-                path_predict = self.LogPath + '/predict.pt'
+                path_predict = self.LogPath + '/predict_' + self.PredictKey + '.pt'
             else:
-                path_predict = self.DirPath + '/predict.pt'
-            self.predict = torch.load(path_predict)
+                try:
+                    path_predict = self.DirPath + '/predict.pt'
+                except:
+                    path_predict = None
+            try:
+                self.predict = torch.load(path_predict)
+            except:
+                self.predict = None
 
         
     def train_dataloader(self):
@@ -158,7 +188,7 @@ class PINN_DataModule(pl.LightningDataModule):
         combined_loader = CombinedLoader(loaders, mode='max_size_cycle')
         return combined_loader
 
-    def val_dataloader(self):
+    '''def val_dataloader(self):
         
         datasets = []
         for key in self.validation:
@@ -169,9 +199,9 @@ class PINN_DataModule(pl.LightningDataModule):
             
         loaders = dict(zip(self.Tags, datasets))
         combined_loader = CombinedLoader(loaders, mode='sequential')
-        return combined_loader
-    
-    def test_dataloader(self):
+        return combined_loader'''
+
+    '''def test_dataloader(self):
         
         datasets = []
         for key in self.test:
@@ -182,17 +212,24 @@ class PINN_DataModule(pl.LightningDataModule):
             
         loaders = dict(zip(self.Tags, datasets))
         combined_loader = CombinedLoader(loaders, mode='sequential')
-        return combined_loader
+        return combined_loader'''
     
     def predict_dataloader(self):
-        return DataLoader(dataset=self.predict, batch_size=self.BatchSizePredict, 
+
+        ds = self.predict
+        bs = self.BatchSizePredict
+        if bs==-1:
+            bs = len(ds)
+        return DataLoader(dataset=ds, batch_size=bs, 
                           shuffle=False, num_workers=self.NumWorkers, pin_memory=self.PinMemory, 
                           persistent_workers=self.PersistenWorkers)
     
     def buildDataset(self, stage):
         ds = []
         if stage=='predict':
-            return None #CustomDataset(self.X_test, self.T_exact)
+            ts_ = [5, 25, 45]
+            r0_ = [2, 5, 8]
+            return self.generatePredictDatasets(ts_, r0_) 
         for tag in self.Tags:
             if tag == "Domain":
                 X = self.domain('Sobol', stage, tag)
@@ -231,7 +268,11 @@ class PINN_DataModule(pl.LightningDataModule):
         
         # Generate random collocation points for the two BC from self.t_tensor
         if N_bc==None:
+            aux = self.DatasetLengths[tag][stage]
             N_bc = int(self.DatasetLengths[tag][stage]/4)
+        else:
+            aux = N_bc
+            N_bc = int(N_bc/4)
         
         LB = self.LB
         UB = self.UB
@@ -242,6 +283,7 @@ class PINN_DataModule(pl.LightningDataModule):
         X, Y = [], []
         x_limits = [LB[0], UB[0]]
         y_limits = [LB[1], UB[1]]
+
         for x_limit in x_limits:
             idx_bc = np.random.choice(t_tensor.size()[0], N_bc, replace=False)
             x_bc = x_limit*torch.ones((N_bc, 1))
@@ -250,7 +292,12 @@ class PINN_DataModule(pl.LightningDataModule):
             r_bc = r_tensor[idx_bc].view(-1, 1)
             X.append(torch.cat([x_bc, y_bc, t_bc, r_bc], axis=1))
 
-        for y_limit in y_limits:
+        i = 0
+        for i, y_limit in enumerate(y_limits):
+            i += 1
+            if i==2:
+                if 4*N_bc!=aux:
+                    N_bc += aux - 4*N_bc
             idx_bc = np.random.choice(t_tensor.size()[0], N_bc, replace=False)
             x_bc = x_tensor[idx_bc].view(-1, 1)
             y_bc = y_limit*torch.ones((N_bc, 1))
@@ -272,6 +319,7 @@ class PINN_DataModule(pl.LightningDataModule):
         dataset0 = self.generateData(tag, N0)
         XY_ic0 = torch.from_numpy(dataset0).type(torch.FloatTensor)
         XY_ic1 = self.boundaries(N_bc=N1)
+        XY_ic1[:, 2:3] = torch.zeros(len(XY_ic1), 1) #Impose t=0
         XY_ic = torch.cat([XY_ic0, XY_ic1], axis=0)
         return XY_ic
 
@@ -327,27 +375,30 @@ class PINN_DataModule(pl.LightningDataModule):
             case2_t = (t_before!=0) and (t_after!=0)
             case3_t = (t_before==0) and (t_after==0)
             if case0_t:
-                t_aux1 = (ti + (tf - ti))*lhs(1, N-n) #tf_s + (tf - tf_s)*lhs(1, N-n)
-                t_aux_s = (ti + (tf_s - ti))*lhs(1, n)
-                x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                t_aux1 = ti + (tf - ti)*lhs(1, N-n) #tf_s + (tf - tf_s)*lhs(1, N-n)
+                t_aux_s = ti + (tf_s - ti)*lhs(1, n)
+                #x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                x_aux_s = x0_s + (xf_s - x0_s)*lhs(1, len(t_aux_s))
                 data_t = np.concatenate((t_aux1, t_aux_s), axis=0)
             elif case1_t:
-                t_aux1 = (ti + (tf - ti))*lhs(1, N-n) #ti + (ti_s - ti)*lhs(1, N-n)
+                t_aux1 = ti + (tf - ti)*lhs(1, N-n) #ti + (ti_s - ti)*lhs(1, N-n)
                 t_aux_s = ti_s + (tf - ti_s)*lhs(1, n)
-                x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                #x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                x_aux_s = x0_s + (xf_s - x0_s)*lhs(1, len(t_aux_s))
                 data_t = np.concatenate((t_aux1, t_aux_s), axis=0)
             elif case2_t:
-                N1 = int((tf_s - ti)/(tf - ti)*(N-n))
+                N1 = int((tf_s - ti_s)/(tf - ti)*(N-n))
                 N2 = N - N1 - n
                 #t_aux1 = ti + (ti_s - ti)*lhs(1, N1)
                 #t_aux2 = tf_s + (tf - tf_s)*lhs(1, N2)
-                t_aux1 = (ti + (tf - ti))*lhs(1, N-n) #
+                t_aux1 = ti + (tf - ti)*lhs(1, N-n) #
                 t_aux_s = ti_s + (tf_s - ti_s)*lhs(1, n)
-                x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                #x_aux_s = np.random.triangular(x0_s, x0_s + (t_aux_s-ti_s)*vs, xf_s)
+                x_aux_s = x0_s + (xf_s - x0_s)*lhs(1, len(t_aux_s))
                 #data_t = np.concatenate((t_aux1, t_aux2, t_aux_s), axis=0)
                 data_t = np.concatenate((t_aux1, t_aux_s), axis=0)
             elif case3_t:
-                data_t = (ti + (tf - ti))*lhs(1, N)
+                data_t = ti + (tf - ti)*lhs(1, N)
 
             x_before = x0_s - xi
             x_after  = xf - xf_s
@@ -356,45 +407,45 @@ class PINN_DataModule(pl.LightningDataModule):
             case2_x = (x_before!=0) and (x_after!=0)
             case3_x = (x_before==0) and (x_after==0)
             if case0_x:
-                x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf) #(xi + (xf - xi))*lhs(1, N-n)
+                #x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf)
+                x_aux1 = xi + (xf - xi)*lhs(1, N-n)
                 data_x = np.concatenate((x_aux1, x_aux_s), axis=0)
             elif case1_x:
-                x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf) #(xi + (xf - xi))*lhs(1, N-n)
+                #x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf)
+                x_aux1 = xi + (xf - xi)*lhs(1, N-n)
                 data_x = np.concatenate((x_aux1, x_aux_s), axis=0)
             elif case2_x:
-                x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf) #(xi + (xf - xi))*lhs(1, N-n)
+                #x_aux1 = np.random.triangular(xi, xi + t_aux1*vs, xf) #(xi + (xf - xi))*lhs(1, N-n)
+                x_aux1 = xi + (xf - xi)*lhs(1, N-n)
                 data_x = np.concatenate((x_aux1, x_aux_s), axis=0)
             elif case3_x:
-                data_x = np.random.triangular(x0_s, x0_s + data_t*vs, xf_s)
+                data_x[:N-n] = xi + (xf - xi)*lhs(1, N-n) #data_x = np.random.triangular(x0_s, x0_s + data_t*vs, xf_s)
             #data_t = (ti + (tf - ti))*lhs(1, N)
+
+            while True: #Loop the ensure that the samples from the Laplace distribution are within the limits (yi, yf)
+                aux = np.random.laplace(y0_s, 0.1*(yf+abs(yi))/2, N-n-1)
+                aux_min = np.min(aux)
+                aux_max = np.max(aux)
+                if (aux_min>=yi) and (aux_max<=yf):
+                    break
+            data_y[:N-n-1, 0] = aux
+
         elif tag=='InitialCondition':
             data_t = np.full((N, 1), ti)
             data_x = np.full((N, 1), np.nan)
-            data_x[:N-n] = (xi + (xf - xi))*lhs(1, N-n)
+            data_x[:N-n] = xi + (xf - xi)*lhs(1, N-n)
+            data_y[:N-n] = yi + (yf - yi)*lhs(1, N-n)
             vs = 0
-            ring_thick *= 10
+            ring_thick *= 5
         else:
             raise ValueError('Invalid tag!')
 
         if r0_i==r0_f:
             data_r = r0_i*np.ones_like(data_x)
         else:
-            data_r = (r0_i + (r0_f - r0_i))*lhs(1, N)
-        #data_t0 = data_t[:N-n-1, 0]
-        #data_x0 = data_x[:N-n-1, 0]
-        #aux = (data_t0>ti_s) * (data_t0<tf_s)
-        #data_x0[aux] = np.random.triangular(x0_s, x0_s+(data_t0[aux]-ti_s)*vs, x0_s+(tf_s-ti_s)*vs)
-        #data_x0[~aux] = np.random.triangular(xi, xi + data_t0[~aux]*vs, xf)
-        #data_x[:len(aux), 0] = data_x0
-        #data_x[:N-n-1, 0] = np.random.triangular(x0, x0 + data_t[:N-n-1, 0]*vs, tf_s*vs) #majority of coll points sampled around laser
+            data_r = r0_i + (r0_f - r0_i)*lhs(1, N)
         
-        while True: #Loop the ensure that the samples from the Laplace distribution are within the limits (yi, yf)
-            aux = np.random.laplace(y0_s, 0.1*(yf+abs(yi))/2, N-n-1)
-            aux_min = np.min(aux)
-            aux_max = np.max(aux)
-            if (aux_min>=yi) and (aux_max<=yf):
-                break
-        data_y[:N-n-1, 0] = aux
+        
         for j in range(N-n-1, N): #Center-bias: some points directly in laser center
             seed = j + skip
             rnd, _ = sobol_seq.i4_sobol(3, seed)
@@ -411,10 +462,11 @@ class PINN_DataModule(pl.LightningDataModule):
             data_y[j, :] = y0_s + radi*np.sin(phi)*np.sin(theta)
 
         dataset = np.concatenate((data_x, data_y, data_t, data_r), axis=1)
+        np.random.shuffle(dataset)
         return dataset
     
 
-    def generatePredictDatasets(self):
+    def generatePredictDatasets(self, ts_, r0_):
 
         nonDimensionalFactors = self.NonDimensionalFactors
         heatSource = self.HeatSource
@@ -426,28 +478,18 @@ class PINN_DataModule(pl.LightningDataModule):
         eps_x = 1e-3*xy_data["RightCoordinate"]
         eps_y = 1e-3*xy_data["TopCoordinate"]
         ys = 0
-        y0 = -np.flipud(np.geomspace(eps_y, xy_data["TopCoordinate"], 10))
-        y1 = np.geomspace(eps_y, xy_data["TopCoordinate"], 10)
+        y0 = -np.flipud(np.geomspace(eps_y, xy_data["TopCoordinate"], 50))
+        y1 = np.geomspace(eps_y, xy_data["TopCoordinate"], 50)
         y  = np.concatenate((y0, np.array([ys]), y1), axis=0)
-
-        #x = torch.linspace(xy_data["LeftCoordinate"], xy_data["RightCoordinate"], 1000)
-        #y = torch.linspace(xy_data["BottomCoordinate"], xy_data["TopCoordinate"], 1000)
-        #ms_x, ms_y = torch.meshgrid(x, y)
-        #x_pred = ms_x.flatten().view(-1, 1)
-        #y_pred = ms_y.flatten().view(-1, 1)
-
+        x  = np.linspace(xy_data["LeftCoordinate"], xy_data["RightCoordinate"], 250)
+        
         ds = []
         keys = []
-        ts_ = [5, 25, 50]
-        r0_ = [0.02, 0.2, 2.0]
         ts = [kt*x for x in ts_]
         xs = [kt*x*vs for x in ts_]
         r0 = [kx*x for x in r0_]
         name = "ds_"
         for i, tsi in enumerate(ts):
-            x0 = np.abs(np.geomspace(xs[i], eps_x, 10) - xs[i])
-            x1 = np.geomspace(xs[i]+eps_x, xy_data["RightCoordinate"], 10)
-            x  = np.concatenate((x0, np.array([xs[i]]), x1), axis=0)
             xt = torch.from_numpy(x).type(torch.FloatTensor)
             yt = torch.from_numpy(y).type(torch.FloatTensor)
             ms_x, ms_y = torch.meshgrid(xt, yt)

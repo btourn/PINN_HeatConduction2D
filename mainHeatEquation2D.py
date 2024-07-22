@@ -15,16 +15,16 @@ def initialize_inputs():
     k = 0.025 # Thermal Conductivity (W/mm.K)
     cp = 685.0 # Specific Heat Capacity (J/kg.K)
     alpha = k/(rho*cp) # Thermal Diffusivity
-    T0 = 298.0 # Initial temperature (K)
-    referenceTemperature = 298.0 # Temperature (K)
+    T0 = 273.0 # Initial temperature (K)
+    referenceTemperature = 273.0 # Temperature (K)
     L, H = 100.0, 50.0 # Size of rectangular domain (mm)
-    r0_i, r0_f = 0.02, 2.0 # Characteristic radius (mm)
+    r0_i, r0_f = 1.0, 10.0 # Characteristic radius (mm)
     xi, xf = 0.0, L # x-limits
     yi, yf = -H/2, H/2 # y-limits
     ti, tf = 0.0, 50.0 # Time domain(s)
     vs = 2. #2 # Heat source velocity (mm/s)
     P = 62.83185 # Heat source total power (W)
-    ti_s, tf_s = 1., 50. # Initial and final time of heat source
+    ti_s, tf_s = 0.0, 50.0 # Initial and final time of heat source
     x0_s, y0_s = 0.0, 0.0 # Initial position of heat source (mm)
     rho_ref = k_ref = cp_ref = alpha_ref = T_ref = vs_ref = P_ref = kx = kt = 1
     nonDimensional = True
@@ -40,7 +40,7 @@ def initialize_inputs():
                              'Temperature': T_ref}
     
     dir_path_ = None
-    loadDatasetFromDirectory = 0 #bool(inputData["Load datasets from directory"]["Value"])
+    loadDatasetFromDirectory = 0 
     if loadDatasetFromDirectory:
         dir_path_ = ""
             
@@ -96,8 +96,16 @@ def initialize_inputs():
         "LowerCharacteristicRadius": r0_i*kx,
         "UpperCharacteristicRadius": r0_f*kx,
     }
-    lb = [float(physical_domain_["LeftCoordinate"]), float(physical_domain_["BottomCoordinate"]), float(time_domain_["InitialTime"]), float(heat_source_["LowerCharacteristicRadius"])]
-    ub = [float(physical_domain_["RightCoordinate"]), float(physical_domain_["TopCoordinate"]), float(time_domain_["FinalTime"]), float(heat_source_["UpperCharacteristicRadius"])]
+    lb = [
+        float(physical_domain_["LeftCoordinate"]), 
+        float(physical_domain_["BottomCoordinate"]), 
+        float(time_domain_["InitialTime"]), 
+        float(heat_source_["LowerCharacteristicRadius"])]
+    ub = [
+        float(physical_domain_["RightCoordinate"]), 
+        float(physical_domain_["TopCoordinate"]), 
+        float(time_domain_["FinalTime"]), 
+        float(heat_source_["UpperCharacteristicRadius"])]
     problem_description_ = {
         "Dict_Name": "Problem description",
         "MaterialProperties": material_properites_,
@@ -113,11 +121,11 @@ def initialize_inputs():
     }
     collocation_points_ = {
         "Dict_Name": "Collocation points",
-        "Domain": 10000, #100,
-        "BoundaryCondition": 5000, #12,
-        "InitialCondition": 10000, #10,
-        "ProportionOfEntriesWithinDisk": 0.1,
-        "RadiusOfDisk": 0.1*kx
+        "Domain": 40000,
+        "BoundaryCondition": 2500, 
+        "InitialCondition": 10000, 
+        "ProportionOfEntriesWithinDisk": 0.2,
+        "RadiusOfDisk": 1.*kx
     }
     labelled_data_points_ = {
         "Dict_Name": "Labelled data points",
@@ -128,40 +136,35 @@ def initialize_inputs():
         "Dict_Name": "Network properties",
         "InputDimensions": 4,
         "OutputDimensions": 1,
-        "HiddenLayers": 3,
-        "NumberOfNeurons": 10,
-        "DatasetPartitions": [0.6, 0.2, 0.2],
+        "HiddenLayers": 6,
+        "NumberOfNeurons": 150,
+        "DatasetPartitions": [1., 0., 0.],
         "WeightDecay": 0,
-        "Epochs": 10,
+        "Epochs": 15000,
         "LearningRate": 0.8,
-        "Activation": "sin", #"tanh",
+        "Activation": "tanh", #"tanh", etc
         "Optimizer": "LBFGS", #"ADAM",
         "Criterion": "MSE",
         "Device": "cpu",
         "BatchSizeTrain": -1,
         "BatchSizeValidation": -1,
         "BatchSizeTest": -1,
-        "BatchSizePredict": 1000
+        "BatchSizePredict": -1
     }
     
     # Define directory for storing the results
     data_time_now = datetime.now().strftime("%d%m%Y_%H%M%S")
     labelledData = labelled_data_points_["UseLabelledData"]
-    suffix = '_labelledData' + str(int(labelledData)) + '_nonDimensional' + str(int(nonDimensional)) #+ '_hardImposedBC' + str(int(hardImposedDirichletBC))
+    suffix = '_labelledData' + str(int(labelledData)) + '_nonDimensional' + str(int(nonDimensional)) 
     log_path_ = '%s' % (data_time_now) + suffix
     if not os.path.exists("./" + log_path_):
         os.makedirs("./" + log_path_)
 
     # Save variables as pickle
-    with open("./" + log_path_ + "/" + '_problem_description.pkl', 'wb') as f:
-        pickle.dump(problem_description_, f)
-    with open("./" + log_path_ + "/" + '_collocation_points.pkl', 'wb') as f:
-        pickle.dump(collocation_points_, f)
-    with open("./" + log_path_ + "/" + '_labelled_data_points.pkl', 'wb') as f:
-        pickle.dump(labelled_data_points_, f)    
-    with open("./" + log_path_ + "/" + '_network_properties.pkl', 'wb') as f:
-        pickle.dump(network_properties_, f)
-
+    torch.save(problem_description_, "./" + log_path_ + "/" + '_problem_description.pt')
+    torch.save(collocation_points_, "./" + log_path_ + "/" + '_labelled_data_points.pt')
+    torch.save(labelled_data_points_, "./" + log_path_ + "/" + '_labelled_data_points.pt')
+    torch.save(network_properties_, "./" + log_path_ + "/" + '_network_properties.pt')
 
     return problem_description_, collocation_points_, labelled_data_points_, network_properties_, log_path_, dir_path_
 
@@ -185,13 +188,18 @@ def main():
         device = torch.device('cpu')
     network_properties["Device"] = device
 
+    # Customize seed
+    s = 123
+    pl.seed_everything(s)
+
     # Initialize plot class
     plot = PlotClass()
 
     # Generate data
     dataModule = PINN_DataModule(problem_description, collocation_points, labelled_data_points, network_properties, log_path, dir_path)
-    with open("./" + log_path + "/" + '_dataModule.pkl', 'wb') as f:
-        pickle.dump(dataModule, f)
+    torch.save(dataModule, "./" + log_path + "/" + '_dataModule.pt')
+    #with open("./" + log_path + "/" + '_dataModule.pkl', 'wb') as f:
+    #    pickle.dump(dataModule, f)
     #dataModule.plotDistribution("./" + log_path)
 
     #dataModule.prepare_data()
@@ -199,8 +207,9 @@ def main():
     # Generate model
     model = Backbone(network_properties, problem_description)
     init_xavier(model)
-    with open("./" + log_path + "/" + '_model.pkl', 'wb') as f:
-        pickle.dump(model, f)
+    torch.save(model, "./" + log_path + "/" + '_model.pt')
+    #with open("./" + log_path + "/" + '_model.pkl', 'wb') as f:
+    #    pickle.dump(model, f)
     PINN_model = PINN_Model(model, network_properties, problem_description)
 
     # Define flags for callbacks, checkpoints, hardware, etc.
@@ -210,9 +219,9 @@ def main():
     metricTracker     = MetricTracker()
     timer             = Timer()
     modelCheckpoints  = ModelCheckpoint(
-        monitor='loss_val', 
+        monitor='loss', 
         mode='min', 
-        every_n_epochs=1, 
+        every_n_epochs=100, 
         save_on_train_epoch_end=True, 
         save_top_k=-1)
     callbacks = [printingCallbacks, 
@@ -227,13 +236,14 @@ def main():
         deterministic=True,
         callbacks=callbacks,
         inference_mode=False,
-        check_val_every_n_epoch=1,
-        enable_progress_bar=False
+        check_val_every_n_epoch=100,
+        enable_progress_bar=False,
         #profiler='simple'
         #log_every_n_steps=5
     )
-    with open("./" + log_path + "/" + '_trainer.pkl', 'wb') as f:
-        pickle.dump(trainer, f)
+    torch.save(trainer, "./" + log_path + "/" + '_trainer.pt')
+    #with open("./" + log_path + "/" + '_trainer.pkl', 'wb') as f:
+    #    pickle.dump(trainer, f)
 
     # Train the model
     print("##############   Fitting Model   ##############")
@@ -246,35 +256,29 @@ def main():
     #plot.trainAndValidationErrors(metricTracker.collectionValidation, 'validation', "./" + log_path)
 
     #Testing the model
-    print("##############   Testing Model   ##############")
-    timer.start_time("test")
-    trainer.test(PINN_model, datamodule=dataModule, ckpt_path=ckpt_path)
-    elapsed_time_test = timer.time_elapsed("test")
-    print("\nTesting Time: ", elapsed_time_test)
+    #print("##############   Testing Model   ##############")
+    #timer.start_time("test")
+    #trainer.test(PINN_model, datamodule=dataModule, ckpt_path='best')
+    #elapsed_time_test = timer.time_elapsed("test")
+    #print("\nTesting Time: ", elapsed_time_test)
 
     # Make predictions
     print("##############   Evaluating Model   ##############")
-    parentDir = './ExactSolutions'
-    files = os.listdir(parentDir)
     keys, preds = [], []
-    dataModule.DirPath = log_path
-    for file in files:
-        if 'ds' in file:
-            data = scipy.io.loadmat(parentDir + '/' + file)
-            XY = torch.from_numpy(data['XY']).type(torch.FloatTensor)
-            T  = torch.from_numpy(data['T']).type(torch.FloatTensor)
-            ds = CustomDataset(XY, T)
-            dl = DataLoader(dataset=ds, batch_size=len(ds), shuffle=False)
-            T_pred_by_batch = trainer.predict(PINN_model, dataloaders=dl, ckpt_path=ckpt_path)
-            T_pred = torch.cat(T_pred_by_batch, axis=0)
-            fig_name = 'predict' + file[2:-4]
-            plot.temperaturePrediction(XY, T_pred, log_path, fig_name)
-            keys.append(file)
-            preds.append(T_pred)
+    ndf = problem_description["NonDimensionalFactors"]
+    for key in dataModule.AllKeysPredict:
+        dataModule.PredictKey = key
+        T_pred = trainer.predict(PINN_model, datamodule=dataModule, ckpt_path='best')[0]
+        XY = dataModule.predict
+        file = 'predict_' + key
+        keys.append(file)
+        preds.append([XY, T_pred])
+        plot.temperaturePrediction(XY, T_pred, ndf, log_path, file)
 
     predictions = dict(zip(keys, preds))
-    with open("./" + log_path + "/" + '_predictions.pkl', 'wb') as f:
-        pickle.dump(predictions, f)
+    torch.save(predictions, "./" + log_path + "/" + '_predictions.pt')
+    #with open("./" + log_path + "/" + '_predictions.pkl', 'wb') as f:
+    #    pickle.dump(predictions, f)
 
 
 
