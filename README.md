@@ -9,20 +9,21 @@ Parámetro | Valor |
 ----------- | ----------- |
 Densidad $\rho$ ($\mathrm{kg\,mm^{-3}}$) | $7.6\mathrm{e}{-6}$
 Conductividad térmica $k$ ($\mathrm{W\, mm^{-1}\,K^{-1}}$) |$0.025$
-Capacidad térmica específica $c_p$ ($\mathrm{J\, kg^{-1}\,K^{-1}}$) |658
+Capacidad térmica específica $c_p$ ($\mathrm{J\, kg^{-1}\,K^{-1}}$) | $658$
 Difusividad térmica $\alpha$ ($\mathrm{mm}^2\,\mathrm{s}^{-1}$) | $4.80215$
-Longitud del dominio $L$ ($\mathrm{mm}$) |100
-Ancho del dominio $H$ ($\mathrm{mm}$) |50
-Tiempo total del análisis transiente $t_f$ ($\mathrm{s}$) |50
-Temperatura inicial $T_0$ (K) |273
+Longitud del dominio $L$ ($\mathrm{mm}$) | $100$
+Ancho del dominio $H$ ($\mathrm{mm}$) | $50$
+Tiempo total del análisis transiente $t_f$ ($\mathrm{s}$) | $50$
+Temperatura inicial $T_0$ (K) | $273$
 Potencia total de la fuente Gaussiana $\dot{Q}_T$ ($\mathrm{W}$) | $62.83185$
-Velocidad de la fuente $v$ ($\mathrm{mm\, s^{-1}}$) | 2
+Velocidad de la fuente $v$ ($\mathrm{mm\, s^{-1}}$) | $2$
 Radio característico $r_0$ ($\mathrm{mm}$) | $1.0$ a $10.0$
 
 
 ## Ecuaciones de gobierno
 
 A continuación se escriben las ecuaciones de gobierno del problema de valores iniciales y de borde:
+
 $$
 \begin{aligned}
 \rho c\frac{\partial T(x,y,t)}{\partial t} &= \nabla\cdot(k\nabla T(x,y,t)) + \dot{Q},\quad \forall(x,y)\in\Omega,\, 0<t\leq t_f,\\
@@ -30,7 +31,9 @@ $$
 T(x,y,0)&=T_0, \quad \forall(x,y)\in\Omega,\, t=0,
 \end{aligned}
 $$
+
 donde
+
 $$
 \dot{Q}(x,y,t) = \frac{\dot{Q}_T}{\pi r_0^2}e^{-(x-vt)^2/r_0^2}e^{-y^2/r_0^2}
 $$
@@ -39,10 +42,13 @@ $$
 ## Adimensionalización
 
 El proceso de adimensionalización de las ecuaciones de gobierno previamente mostradas involucra la definición de las siguientes expresiones:
+
 $$
 \xi=\frac{x}{L}, \quad \eta=\frac{y}{L}, \quad \rho_0=\frac{r_0}{L}, \quad \tau=\frac{\alpha}{L^2}t, \quad u=\frac{T}{T_0},
 $$
+
 que conducen a las ecuaciones:
+
 $$
 \begin{aligned}
 \frac{\partial u}{\partial\tau} &= \Delta{u} + \dot{\mathcal{Q}}(\xi,\eta,\tau),\quad\forall(\xi,\eta)\in\Omega^{\ast},\, 0<\tau\leq \tau_f\\
@@ -50,14 +56,19 @@ $$
 u(\xi,\eta,0)&=u_0, \quad \forall(\xi,\eta)\in\Omega^{\ast},\, \tau=0,
 \end{aligned}
 $$
+
 donde 
+
 $$
 \dot{\mathcal{Q}}(\xi,\eta,\tau) = \frac{\dot{Q}_T^{\ast}}{\pi\rho_0^2}e^{-(\xi-v^{\ast}\tau)^2/\rho_0^2}e^{-\eta^2/\rho_0^2}
 $$
+
 y
+
 $$
 \dot{Q}_T^{\ast}=\frac{\dot{Q}_T}{k T_0}\quad\text{y}\quad v^{\ast}=\frac{v}{\alpha/L},
 $$
+
 
 ## Breve descripción del modelo PINN
 
