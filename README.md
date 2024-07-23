@@ -1,3 +1,7 @@
+# Idioma del archivo README
+[![es](https://img.shields.io/badge/lang-es-red.svg)](https://github.com/btourn/PINN_HeatConduction2D.git/blob/master/README.md)
+[![en](https://img.shields.io/badge/lang-en-yellow.svg)](https://github.com/btourn/PINN_HeatConduction2D.git/blob/master/README_EN.md)
+
 # PINN para un problema de conducción de calor 2D
 
 Este repositorio contiene el código desarrollado con PyTorch Lightning para un problema de conducción de calor bidimensional en régimen transiente, que consiste en una fuente de calor móvil con distribución Gaussiana sobre una placa plana rectangular de dimensiones $L\times H$. El desarrollo aquí mostrado constituye parte del Trabajo Final de la carrera de Especialización en Inteligencia Artificial (CEIA) del Laboratorio de Sistemas Embebidos (LSE) perteneciente a la Facultad de Ingeniería de la Universidad de Buenos Aires (FIUBA). 
