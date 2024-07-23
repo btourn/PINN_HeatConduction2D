@@ -23,20 +23,18 @@ Radio característico $r_0$ ($\mathrm{mm}$) | $1.0$ a $10.0$
 ## Ecuaciones de gobierno
 
 A continuación se escriben las ecuaciones de gobierno del problema de valores iniciales y de borde:
-
-$$
+```math
 \begin{aligned}
 \rho c_p\frac{\partial T(x,y,t)}{\partial t} &= \nabla\cdot(k\nabla T(x,y,t)) + \dot{Q},\quad \forall(x,y)\in\Omega, \quad 0<t\leq t_f,\\
 \nabla T(x,y,t) &= 0, \quad\partial\Omega, \quad 0<t\leq t_f,\\
 T(x,y,0) &= T_0, \quad \forall(x,y)\in\Omega, \quad t=0,
 \end{aligned}
-$$
+```
 
 donde
-
-$$
+```math
 \dot{Q}(x,y,t) = \frac{\dot{Q}_T}{\pi r_0^2}e^{-(x-vt)^2/r_0^2}e^{-y^2/r_0^2}
-$$
+```
 
 
 ## Adimensionalización
