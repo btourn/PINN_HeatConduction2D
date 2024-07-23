@@ -1,6 +1,6 @@
 # Idioma del archivo README
-[![es](https://img.shields.io/badge/lang-es-red.svg)](https://github.com/btourn/PINN_HeatConduction2D.git/blob/master/README.md)
-[![en](https://img.shields.io/badge/lang-en-yellow.svg)](https://github.com/btourn/PINN_HeatConduction2D.git/blob/master/README_EN.md)
+[![es](https://img.shields.io/badge/lang-es-red.svg)](https://github.com/btourn/PINN_HeatConduction2D/blob/main/README.md)
+[![en](https://img.shields.io/badge/lang-en-yellow.svg)](https://github.com/btourn/PINN_HeatConduction2D/blob/main/README_EN.md)
 
 # PINN para un problema de conducción de calor 2D
 
