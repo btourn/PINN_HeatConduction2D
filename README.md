@@ -27,8 +27,8 @@ A continuación se escriben las ecuaciones de gobierno del problema de valores i
 $$
 \begin{aligned}
 \rho c_p\frac{\partial T(x,y,t)}{\partial t} &= \nabla\cdot(k\nabla T(x,y,t)) + \dot{Q},\quad \forall(x,y)\in\Omega, \quad 0<t\leq t_f,\\
-\nabla T(x,y,t)&=0, \quad\partial\Omega, \quad 0<t\leq t_f,\\
-T(x,y,0)&=T_0, \quad \forall(x,y)\in\Omega, \quad t=0,
+\nabla T(x,y,t) &= 0, \quad\partial\Omega, \quad 0<t\leq t_f,\\
+T(x,y,0) &= T_0, \quad \forall(x,y)\in\Omega, \quad t=0,
 \end{aligned}
 $$
 
@@ -66,7 +66,7 @@ $$
 y
 
 $$
-\dot{Q}_T^{\ast}=\frac{\dot{Q}_T}{k T_0}\quad\text{y}\quad v^{\ast}=\frac{v}{\alpha/L},
+\dot{Q}_T^{\ast}=\frac{\dot{Q}_T}{k T_0}\quad\mathrm{y}\quad v^{\ast}=\frac{v}{\alpha/L},
 $$
 
 
@@ -77,14 +77,15 @@ El modelo PINN consiste en una red neuronal completamente conectada con 4 *featu
 El entrenamiento se realiza de manera no supervisada (es decir, sin datos rotulados) mediante el algoritmo LBFGS. Se define la función de pérdida
 
 $$
-\mathcal{L} = \mathcal{L}_{\text{PDE}} + \mathcal{L}_{\text{BC}} + \mathcal{L}_{\text{IC}}
+\mathcal{L} = \mathcal{L}_{\mathrm{PDE}} + \mathcal{L}_{\mathrm{BC}} + \mathcal{L}_{\mathrm{IC}}
 $$
 
 donde 
+
 $$
 \begin{aligned}
-\mathcal{L}_{\text{PDE}} &= \frac{1}{N_{\text{PDE}}}\sum_{N_{\text{PDE}}}\Bigg[\rho c_p\frac{\partial T(x,y,t)}{\partial t} - \nabla\cdot(k\nabla T(x,y,t)) - \dot{Q}\Bigg]^2\\
-\mathcal{L}_{\text{BC}} &= \frac{1}{N_{\text{BC}}}\sum_{N_{\text{BC}}}\big[\nabla T(x,y,t)\big]^2\\
-\mathcal{L}_{\text{IC}} &= \frac{1}{N_{\text{IC}}}\sum_{N_{\text{IC}}}\big[T(x,y,0) - T_0\big]^2
+\mathcal{L}_{\mathrm{PDE}} &= \frac{1}{N_{\mathrm{PDE}}}\sum_{N_{\mathrm{PDE}}}\Bigg[\rho c_p\frac{\partial T(x,y,t)}{\partial t} - \nabla\cdot(k\nabla T(x,y,t)) - \dot{Q}\Bigg]^2\\
+\mathcal{L}_{\mathrm{BC}} &= \frac{1}{N_{\mathrm{BC}}}\sum_{N_{\mathrm{BC}}}\big[\nabla T(x,y,t)\big]^2\\
+\mathcal{L}_{\mathrm{IC}} &= \frac{1}{N_{\mathrm{IC}}}\sum_{N_{\mathrm{IC}}}\big[T(x,y,0) - T_0\big]^2
 \end{aligned}
 $$
