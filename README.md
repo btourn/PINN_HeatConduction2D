@@ -26,9 +26,9 @@ A continuación se escriben las ecuaciones de gobierno del problema de valores i
 
 $$
 \begin{aligned}
-\rho c\frac{\partial T(x,y,t)}{\partial t} &= \nabla\cdot(k\nabla T(x,y,t)) + \dot{Q},\quad \forall(x,y)\in\Omega,\, 0<t\leq t_f,\\
-\nabla T(x,y,t)&=0, \quad\partial\Omega,\,0<t\leq t_f,\\
-T(x,y,0)&=T_0, \quad \forall(x,y)\in\Omega,\, t=0,
+\rho c_p\frac{\partial T(x,y,t)}{\partial t} &= \nabla\cdot(k\nabla T(x,y,t)) + \dot{Q},\quad \forall(x,y)\in\Omega, \quad 0<t\leq t_f,\\
+\nabla T(x,y,t)&=0, \quad\partial\Omega, \quad 0<t\leq t_f,\\
+T(x,y,0)&=T_0, \quad \forall(x,y)\in\Omega, \quad t=0,
 \end{aligned}
 $$
 
@@ -51,9 +51,9 @@ que conducen a las ecuaciones:
 
 $$
 \begin{aligned}
-\frac{\partial u}{\partial\tau} &= \Delta{u} + \dot{\mathcal{Q}}(\xi,\eta,\tau),\quad\forall(\xi,\eta)\in\Omega^{\ast},\, 0<\tau\leq \tau_f\\
-\nabla u(\xi,\eta,\tau)&=0, \quad\partial\Omega^{\ast},\,0<\tau\leq \tau_f,\\
-u(\xi,\eta,0)&=u_0, \quad \forall(\xi,\eta)\in\Omega^{\ast},\, \tau=0,
+\frac{\partial u}{\partial\tau} &= \Delta{u} + \dot{\mathcal{Q}}(\xi,\eta,\tau),\quad\forall(\xi,\eta)\in\Omega^{\ast}, \quad 0<\tau\leq \tau_f\\
+\nabla u(\xi,\eta,\tau)&=0, \quad\partial\Omega^{\ast}, \quad 0<\tau\leq \tau_f,\\
+u(\xi,\eta,0)&=u_0, \quad \forall(\xi,\eta)\in\Omega^{\ast}, \quad \tau=0,
 \end{aligned}
 $$
 
@@ -72,4 +72,19 @@ $$
 
 ## Breve descripción del modelo PINN
 
-El modelo PINN consiste en una red neuronal completamente con entradas $x\in[0,L]$, $y\in[-H/2, H/2]$, $t\in[0, t_f]$ y $r_0\in[1.0; 10.0]$, y salida $\hat{T}(x,y,t,r_0)$. La solución que ofrece es paramétrica dado que permite obtener resultados para diversos radios característicos $r_0$. 
+El modelo PINN consiste en una red neuronal completamente conectada con 4 *features* de entrada: $x\in[0,L]$, $y\in[-H/2, H/2]$, $t\in[0, t_f]$ y $r_0\in[1.0; 10.0]$; y una salida, $\hat{T}(x,y,t,r_0)$. La solución que ofrece es paramétrica dado que permite obtener resultados para diversos radios característicos $r_0$.
+
+El entrenamiento se realiza de manera no supervisada (es decir, sin datos rotulados) mediante el algoritmo LBFGS. Se define la función de pérdida
+
+$$
+\mathcal{L} = \mathcal{L}_{\text{PDE}} + \mathcal{L}_{\text{BC}} + \mathcal{L}_{\text{IC}}
+$$
+
+donde 
+$$
+\begin{aligned}
+\mathcal{L}_{\text{PDE}} &= \frac{1}{N_{\text{PDE}}}\sum_{N_{\text{PDE}}}\Bigg[\rho c_p\frac{\partial T(x,y,t)}{\partial t} - \nabla\cdot(k\nabla T(x,y,t)) - \dot{Q}\Bigg]^2\\
+\mathcal{L}_{\text{BC}} &= \frac{1}{N_{\text{BC}}}\sum_{N_{\text{BC}}}\big[\nabla T(x,y,t)\big]^2\\
+\mathcal{L}_{\text{IC}} &= \frac{1}{N_{\text{IC}}}\sum_{N_{\text{IC}}}\big[T(x,y,0) - T_0\big]^2
+\end{aligned}
+$$
